@@ -9,10 +9,12 @@
 > upstream documentation is accurate and fully applicable — see the
 > Documentation section of `instructions.md` for links.
 
-[Core Lightning](https://github.com/ElementsProject/lightning) is a Lightning Network node implementation. This package builds it with three plugins built into the image, runs a web UI alongside it, and can act as — or subscribe to — a BOLT13 watchtower.
+[Core Lightning](https://github.com/ElementsProject/lightning) is a Lightning Network node implementation. This package builds it with three plugins built into the image, runs a web UI alongside it, and can act as, or subscribe to, a BOLT13 watchtower.
 
-- **Upstream repo:** <https://github.com/ElementsProject/lightning>
-- **Wrapper repo:** <https://github.com/Start9Labs/cln-startos>
+This is the `#blake` flavor of the package. It builds a fork of Core Lightning v26.06.7 that parses the 164-byte BLAKE2b block header, which the stock build cannot: a stock node stops at the fork's activation block. Nothing else about the package differs, and the flavor replaces the stock build in place without touching the node's data.
+
+- **Upstream repo:** <https://github.com/privkeyio/lightning> (fork of <https://github.com/ElementsProject/lightning>)
+- **Wrapper repo:** <https://github.com/privkeyio/cln-startos> (fork of <https://github.com/Start9Labs/cln-startos>)
 
 ---
 
@@ -35,12 +37,12 @@
 
 ## Image and Container Runtime
 
-Two images. The node's is built here: upstream's signed release tarball is unpacked onto a slim Debian base and three extra plugins are added; the web UI's is pulled as published. lightningd comes from the tarball rather than the `elementsproject/lightningd` image, whose v26.06.7 build omitted that release's security fixes while still reporting the new version — the tarball's checksum is pinned in the `lightningd-dist` stage and taken from a GPG-verified manifest. `bitcoin-cli` is pinned and checksummed the same way in the `bitcoin-cli` stage: `plugin-bcli` and the `check-synced` health check both exec it, and the image it used to come with no longer supplies it.
+Two images. The node's is built here: a signed release tarball is unpacked onto a slim Debian base and three extra plugins are added; the web UI's is pulled as published. lightningd comes from the `v26.06.7-blake2b` tarball published by the fork, with its checksum pinned in the `lightningd-dist` stage and taken from a GPG-verified manifest. `bitcoin-cli` is pinned and checksummed the same way in the `bitcoin-cli` stage: `plugin-bcli` and the `check-synced` health check both exec it, and the image it used to come with no longer supplies it.
 
 | Property      | Value                                                                                             |
 | ------------- | ------------------------------------------------------------------------------------------------- |
 | Images        | Built from `Dockerfile` on `debian:bookworm-slim`, plus `ghcr.io/elementsproject/cln-application` |
-| Architectures | x86_64, aarch64 — both images declare `emulateMissingAs: 'aarch64'`                               |
+| Architectures | x86_64 only for the node image; the web UI image keeps `emulateMissingAs: 'aarch64'`             |
 | Entrypoint    | `lightningd` with an explicit config path; the UI runs its own server                             |
 
 Three plugins are dropped into the plugin directory at build time: **CLBOSS** (automated channel management) and **watchtower-client**/**teosd** from rust-teos (BOLT13 watchtower, both client and server) are compiled from their git submodules, and **sling** (rebalancing) is an upstream release binary pinned by `SLING_VERSION` in the `Dockerfile`. Nothing is fetched at runtime, so the image is self-contained.
@@ -249,7 +251,7 @@ Restoring a Lightning node's channel database is dangerous — a stale copy clai
 5. **A custom external host is incompatible with Tor Only** and is dropped while both are set.
 6. **The watchtower is not configurable.** Its ports, bind addresses, and subscription parameters are fixed.
 7. **Plugins are those built into the image.** Adding another means changing the image, not dropping a file on the volume.
-8. **No riscv64 build**, and on hardware without a native image the aarch64 build runs emulated.
+8. **x86_64 only.** The fork does not publish an aarch64 lightningd yet, so the node image declares `x86_64` with no emulation fallback rather than shipping a build that cannot follow the chain.
 
 ---
 
@@ -260,7 +262,6 @@ package_id: c-lightning
 image: ./Dockerfile # on debian:bookworm-slim; plus ghcr.io/elementsproject/cln-application
 architectures:
   - x86_64
-  - aarch64
 subcontainers:
   - lightning-sub # lightningd, teosd, and every oneshot; the one to attach to
   - cln-application-sub # the web UI
