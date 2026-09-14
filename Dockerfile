@@ -66,18 +66,20 @@ WORKDIR /tmp/rust-teos
 RUN cargo install --locked --path teos && \
     cargo install --locked --path watchtower-plugin
 
-# lightningd, from the signed release tarballs rather than the published image.
+# lightningd, from the signed release tarballs.
 #
-# The v26.06.7 images upstream published were built by CI from the wrong tree and
-# do not contain the release's security fixes, though they report v26.06.7 on
-# startup. The tarballs are the release. These hashes come from
-# SHA256SUMS-v26.06.7, GPG-verified against maintainer key
-# 4E4A142F8BD3C38A56B362ED578CAC08472545C5.
+# This is a fork of Core Lightning v26.06.7 that adds support for the 164-byte
+# BLAKE2b block header. Without it a node cannot parse the activation block and
+# dies on the first one. Only amd64 is published so far, so arm64 fails loudly
+# rather than silently falling back to a build that cannot follow the chain.
+#
+# The hash comes from SHA256SUMS-v26.06.7-blake2b.3, GPG-verified against
+# A47D99B6DB0D715D40C59A2023AE8A8EA7E24E38.
 FROM base AS lightningd-dist
 ARG TARGETARCH
-ARG CLN_VERSION=v26.06.7
-ARG CLN_SHA256_AMD64=53ddf124fe7058b6a2fc059d104976cc54ba5be21dc55b295cd82d01cabeb39c
-ARG CLN_SHA256_ARM64=a6e89d49468dac83122d6b795796b7f2ebb55eab6181b419f1cf9a73aeae3965
+ARG CLN_REPO=privkeyio/lightning
+ARG CLN_VERSION=v26.06.7-blake2b.3
+ARG CLN_SHA256_AMD64=9d70d13eab72fe2b727d9070e5a0551280f8154c612f3bb2806c5d7ac9dcbb89
 RUN apt-get update -qq && \
     apt-get install -qq -y --no-install-recommends ca-certificates xz-utils && \
     rm -rf /var/lib/apt/lists/*
@@ -86,11 +88,10 @@ RUN apt-get update -qq && \
 RUN set -eu; \
     case "$TARGETARCH" in \
       amd64) SHA="$CLN_SHA256_AMD64" ;; \
-      arm64) SHA="$CLN_SHA256_ARM64" ;; \
-      *) echo "unsupported TARGETARCH: $TARGETARCH" >&2; exit 1 ;; \
+      *) echo "no ${CLN_VERSION} build for TARGETARCH ${TARGETARCH}" >&2; exit 1 ;; \
     esac; \
     TARBALL="clightning-${CLN_VERSION}-Ubuntu-22.04-${TARGETARCH}.tar.xz"; \
-    curl -fsSLO "https://github.com/ElementsProject/lightning/releases/download/${CLN_VERSION}/${TARBALL}"; \
+    curl -fsSLO "https://github.com/${CLN_REPO}/releases/download/${CLN_VERSION}/${TARBALL}"; \
     echo "${SHA}  ${TARBALL}" | sha256sum -c -; \
     mkdir -p /dist/usr/local; \
     tar -xf "$TARBALL" -C /dist/usr/local --strip-components=2

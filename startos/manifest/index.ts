@@ -5,8 +5,8 @@ export const manifest = setupManifest({
   id: 'c-lightning',
   title: 'Core Lightning',
   license: 'mit',
-  packageRepo: 'https://github.com/Start9Labs/cln-startos',
-  upstreamRepo: 'https://github.com/ElementsProject/lightning',
+  packageRepo: 'https://github.com/privkeyio/cln-startos',
+  upstreamRepo: 'https://github.com/privkeyio/lightning',
   marketingUrl: 'https://blockstream.com/lightning',
   donationUrl: null,
   description: { short, long },
@@ -19,8 +19,8 @@ export const manifest = setupManifest({
           workdir: '.',
         },
       },
-      arch: ['x86_64', 'aarch64'],
-      emulateMissingAs: 'aarch64',
+      arch: ['x86_64'],
+      emulateMissingAs: null,
     },
     ui: {
       source: {
