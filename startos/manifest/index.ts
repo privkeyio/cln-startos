@@ -19,8 +19,8 @@ export const manifest = setupManifest({
           workdir: '.',
         },
       },
-      arch: ['x86_64'],
-      emulateMissingAs: null,
+      arch: ['x86_64', 'aarch64'],
+      emulateMissingAs: 'aarch64',
     },
     ui: {
       source: {

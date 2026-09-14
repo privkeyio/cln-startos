@@ -42,7 +42,7 @@ Two images. The node's is built here: a signed release tarball is unpacked onto 
 | Property      | Value                                                                                             |
 | ------------- | ------------------------------------------------------------------------------------------------- |
 | Images        | Built from `Dockerfile` on `debian:bookworm-slim`, plus `ghcr.io/elementsproject/cln-application` |
-| Architectures | x86_64 only for the node image; the web UI image keeps `emulateMissingAs: 'aarch64'`             |
+| Architectures | x86_64, aarch64 — both images declare `emulateMissingAs: 'aarch64'`                               |
 | Entrypoint    | `lightningd` with an explicit config path; the UI runs its own server                             |
 
 Three plugins are dropped into the plugin directory at build time: **CLBOSS** (automated channel management) and **watchtower-client**/**teosd** from rust-teos (BOLT13 watchtower, both client and server) are compiled from their git submodules, and **sling** (rebalancing) is an upstream release binary pinned by `SLING_VERSION` in the `Dockerfile`. Nothing is fetched at runtime, so the image is self-contained.
@@ -251,7 +251,7 @@ Restoring a Lightning node's channel database is dangerous — a stale copy clai
 5. **A custom external host is incompatible with Tor Only** and is dropped while both are set.
 6. **The watchtower is not configurable.** Its ports, bind addresses, and subscription parameters are fixed.
 7. **Plugins are those built into the image.** Adding another means changing the image, not dropping a file on the volume.
-8. **x86_64 only.** The fork does not publish an aarch64 lightningd yet, so the node image declares `x86_64` with no emulation fallback rather than shipping a build that cannot follow the chain.
+8. **No riscv64 build**, and on hardware without a native image the aarch64 build runs emulated.
 
 ---
 
@@ -262,6 +262,7 @@ package_id: c-lightning
 image: ./Dockerfile # on debian:bookworm-slim; plus ghcr.io/elementsproject/cln-application
 architectures:
   - x86_64
+  - aarch64
 subcontainers:
   - lightning-sub # lightningd, teosd, and every oneshot; the one to attach to
   - cln-application-sub # the web UI

@@ -70,16 +70,16 @@ RUN cargo install --locked --path teos && \
 #
 # This is a fork of Core Lightning v26.06.7 that adds support for the 164-byte
 # BLAKE2b block header. Without it a node cannot parse the activation block and
-# dies on the first one. Only amd64 is published so far, so arm64 fails loudly
-# rather than silently falling back to a build that cannot follow the chain.
+# dies on the first one.
 #
-# The hash comes from SHA256SUMS-v26.06.7-blake2b.3, GPG-verified against
-# A47D99B6DB0D715D40C59A2023AE8A8EA7E24E38.
+# The hashes come from SHA256SUMS-v26.06.7-blake2b.3 and its -arm64 companion,
+# both GPG-verified against A47D99B6DB0D715D40C59A2023AE8A8EA7E24E38.
 FROM base AS lightningd-dist
 ARG TARGETARCH
 ARG CLN_REPO=privkeyio/lightning
 ARG CLN_VERSION=v26.06.7-blake2b.3
 ARG CLN_SHA256_AMD64=9d70d13eab72fe2b727d9070e5a0551280f8154c612f3bb2806c5d7ac9dcbb89
+ARG CLN_SHA256_ARM64=b2d6a6519ca40331b1fce91abe463509e8e7371bf80841c0df90921d7a85dee9
 RUN apt-get update -qq && \
     apt-get install -qq -y --no-install-recommends ca-certificates xz-utils && \
     rm -rf /var/lib/apt/lists/*
@@ -88,6 +88,7 @@ RUN apt-get update -qq && \
 RUN set -eu; \
     case "$TARGETARCH" in \
       amd64) SHA="$CLN_SHA256_AMD64" ;; \
+      arm64) SHA="$CLN_SHA256_ARM64" ;; \
       *) echo "no ${CLN_VERSION} build for TARGETARCH ${TARGETARCH}" >&2; exit 1 ;; \
     esac; \
     TARBALL="clightning-${CLN_VERSION}-Ubuntu-22.04-${TARGETARCH}.tar.xz"; \
