@@ -13,7 +13,7 @@
 
 This is the `#blake` flavor of the package. It builds a fork of Core Lightning v26.06.7 that parses the 164-byte BLAKE2b block header, which the stock build cannot: a stock node stops at the fork's activation block. It also signs wallet transactions and new channels with the fork's opt-in `SIGHASH_UNIFIED` digest, so post-fork channels funded from post-fork coins cannot be replayed onto the old rules.
 
-Two consequences worth knowing. The node signals a required feature bit, so it will not connect to a Lightning node that has not adopted the fork. And downgrading back to the stock build is refused, because a build without unified signing cannot close the channels this one opens.
+See [BLAKE2b Hard Fork Support](#blake2b-hard-fork-support) for what that changes, including the peers you can connect to and the coins you should fund channels from.
 
 - **Upstream repo:** <https://github.com/privkeyio/lightning> (fork of <https://github.com/ElementsProject/lightning>)
 - **Wrapper repo:** <https://github.com/privkeyio/cln-startos> (fork of <https://github.com/Start9Labs/cln-startos>)
@@ -32,6 +32,7 @@ Two consequences worth knowing. The node signals a required feature bit, so it w
 - [Tasks](#tasks)
 - [Health Checks](#health-checks)
 - [Backups and Restore](#backups-and-restore)
+- [BLAKE2b Hard Fork Support](#blake2b-hard-fork-support)
 - [Limitations and Differences](#limitations-and-differences)
 - [Quick Reference for AI Consumers](#quick-reference-for-ai-consumers)
 
@@ -243,6 +244,21 @@ Restoring a Lightning node's channel database is dangerous — a stale copy clai
 2. `emergencyrecover` runs, and a permanently-failing health check appears saying what that means: **all channels will be force-closed**, funds swept on-chain, and the node should be drained and reinstalled afterwards rather than kept.
 3. Ten thousand wallet addresses are pre-generated. A restored database restarts the address counter at zero, and the node only recognises addresses within a fixed window past the highest known-used index — so without this, a rescan silently misses outputs beyond the first gap. The window this widens applies to every later rescan too.
 4. The [Rescan Blockchain](#tasks) task is raised, because until it runs the on-chain balance reads zero.
+
+## BLAKE2b Hard Fork Support
+
+Stock Core Lightning assumes every block header is 80 bytes and hashes it with SHA256d. The BLAKE2b hard fork changes the proof of work at an activation height: from that block on, headers are 164 bytes and hashed with BLAKE2b, signalled by the top bit of the version field.
+
+This is one chain with continuous history, not a second chain. Every block below the activation height keeps its original 80-byte SHA256d header permanently, so both forms coexist and each must be hashed with its own algorithm. Core Lightning computes block ids itself while following the chain, so a stock node cannot parse the activation block and stops there rather than following the wrong chain.
+
+This build reads both forms. It also signs wallet transactions and new channels with the fork's opt-in `SIGHASH_UNIFIED` digest, so a channel funded after the fork, from coins that are themselves post-fork, cannot be replayed onto the old rules.
+
+Four consequences worth knowing:
+
+- **The node will not connect to a peer that has not adopted the fork.** It advertises a required feature bit. That is deliberate: it stops you opening a channel with a peer who cannot follow the chain. It also means you cannot cooperatively close a channel opened before the fork with a counterparty still on the old rules.
+- **The feature numbers are provisional.** They are not registered BOLT allocations and are expected to move. Channels opened under the current numbering may have to be closed and reopened once they are settled.
+- **Fund channels only from coins received after the fork.** A channel funded from a pre-fork UTXO has a funding transaction valid under both rule sets, which reopens the exposure unified signing exists to close.
+- **Downgrading is refused.** A build without unified signing computes a different signature hash and could not close the channels this one opens, so the package declares the downgrade impossible rather than letting you strand a channel.
 
 ## Limitations and Differences
 
