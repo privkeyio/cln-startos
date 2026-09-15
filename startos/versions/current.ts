@@ -1,7 +1,7 @@
 import { IMPOSSIBLE, VersionInfo } from '@start9labs/start-sdk'
 
 export const current = VersionInfo.of({
-  version: '#blake:26.6.7:1',
+  version: '#blake:26.6.7:2',
   releaseNotes: {
     en_US: `Core Lightning with support for the 164-byte BLAKE2b block header, now with unified signatures.
 
@@ -15,6 +15,8 @@ The node signals a required feature bit, so it will not connect to a Lightning n
 
 The feature numbers are provisional and are expected to change. Channels opened now may have to be closed and reopened once they are settled. Fund channels only from coins received after the fork.
 
+The web interface talks to the node over CLNrest. Earlier builds used commando, which rides the Lightning peer protocol, and this build refuses peers that have not adopted the fork, so the dashboard could not connect.
+
 Your node's configuration does not change.`,
   },
   migrations: {
@@ -27,6 +29,10 @@ Your node's configuration does not change.`,
       //Arriving from the unflavored build, or from the header-only flavor. Both are Core Lightning
       //v26.06.7, so the wallet database is already at the schema this build expects.
       ['^26']: {
+        up: async () => {},
+      },
+      //Arriving from the first blake flavor, whose web interface used commando.
+      ['#blake:26.6.7:1']: {
         up: async () => {},
       },
     },
