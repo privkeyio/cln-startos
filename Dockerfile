@@ -72,14 +72,14 @@ RUN cargo install --locked --path teos && \
 # BLAKE2b block header. Without it a node cannot parse the activation block and
 # dies on the first one.
 #
-# The hashes come from SHA256SUMS-v26.06.7-blake2b.3 and its -arm64 companion,
+# The hashes come from SHA256SUMS-v26.06.7-blake2b.4 and its -arm64 companion,
 # both GPG-verified against A47D99B6DB0D715D40C59A2023AE8A8EA7E24E38.
 FROM base AS lightningd-dist
 ARG TARGETARCH
 ARG CLN_REPO=privkeyio/lightning
-ARG CLN_VERSION=v26.06.7-blake2b.3
-ARG CLN_SHA256_AMD64=9d70d13eab72fe2b727d9070e5a0551280f8154c612f3bb2806c5d7ac9dcbb89
-ARG CLN_SHA256_ARM64=b2d6a6519ca40331b1fce91abe463509e8e7371bf80841c0df90921d7a85dee9
+ARG CLN_VERSION=v26.06.7-blake2b.4
+ARG CLN_SHA256_AMD64=35e7001747f7fdf1cb0b38e75c39366a933285aa2ae2c2612d289f8a65369bd2
+ARG CLN_SHA256_ARM64=d37f6be4ba8d29e3820b207a75fc7bfb5f264b0854dc5fafbb3f5d341d78780a
 RUN apt-get update -qq && \
     apt-get install -qq -y --no-install-recommends ca-certificates xz-utils && \
     rm -rf /var/lib/apt/lists/*

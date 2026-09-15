@@ -11,7 +11,9 @@
 
 [Core Lightning](https://github.com/ElementsProject/lightning) is a Lightning Network node implementation. This package builds it with three plugins built into the image, runs a web UI alongside it, and can act as, or subscribe to, a BOLT13 watchtower.
 
-This is the `#blake` flavor of the package. It builds a fork of Core Lightning v26.06.7 that parses the 164-byte BLAKE2b block header, which the stock build cannot: a stock node stops at the fork's activation block. Nothing else about the package differs, and the flavor replaces the stock build in place without touching the node's data.
+This is the `#blake` flavor of the package. It builds a fork of Core Lightning v26.06.7 that parses the 164-byte BLAKE2b block header, which the stock build cannot: a stock node stops at the fork's activation block. It also signs wallet transactions and new channels with the fork's opt-in `SIGHASH_UNIFIED` digest, so post-fork channels funded from post-fork coins cannot be replayed onto the old rules.
+
+Two consequences worth knowing. The node signals a required feature bit, so it will not connect to a Lightning node that has not adopted the fork. And downgrading back to the stock build is refused, because a build without unified signing cannot close the channels this one opens.
 
 - **Upstream repo:** <https://github.com/privkeyio/lightning> (fork of <https://github.com/ElementsProject/lightning>)
 - **Wrapper repo:** <https://github.com/privkeyio/cln-startos> (fork of <https://github.com/Start9Labs/cln-startos>)
