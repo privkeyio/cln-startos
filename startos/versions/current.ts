@@ -7,11 +7,11 @@ export const current = VersionInfo.of({
 
 The BLAKE2b hard fork activated on mainnet at block 961,640. From that block on, a header is 164 bytes rather than 80 and its block id is BLAKE2b rather than SHA256d. Core Lightning computes block ids itself while following the chain, so an unmodified node cannot parse the activation block and stops there.
 
-This build adds SIGHASH_UNIFIED signing for the wallet and for new channels. A channel funded after the fork, from coins that are themselves post-fork, cannot be replayed onto a chain that did not adopt the rule change.
+This build adds SIGHASH_UNIFIED signing for the wallet and for new channels. A channel funded after the fork, from coins that are themselves post-fork, is signed with hash type `0x21`, which is invalid under the pre-fork rules, and so cannot be replayed on the SHA256d chain.
 
 ## Read this before opening channels
 
-The node signals a required feature bit, so it will not connect to a Lightning node that has not adopted the fork. That is deliberate: it stops you opening a channel with a peer who cannot follow the chain. It also means you cannot cooperatively close a channel opened before the fork with a counterparty still on the old rules.
+The node signals a required feature bit, so it will not connect to a Lightning node that has not adopted the fork. That is deliberate: it stops you opening a channel with a peer who cannot follow the chain. It also means you cannot cooperatively close a channel opened before the fork with a counterparty still on the pre-fork rules.
 
 The feature numbers are provisional and are expected to change. Channels opened now may have to be closed and reopened once they are settled. Fund channels only from coins received after the fork.
 
