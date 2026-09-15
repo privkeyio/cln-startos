@@ -11,7 +11,7 @@
 
 [Core Lightning](https://github.com/ElementsProject/lightning) is a Lightning Network node implementation. This package builds it with three plugins built into the image, runs a web UI alongside it, and can act as, or subscribe to, a BOLT13 watchtower.
 
-This is the `#blake` flavor of the package. It builds a fork of Core Lightning v26.06.7 that parses the 164-byte BLAKE2b block header, which the stock build cannot: a stock node stops at the fork's activation block. It also signs wallet transactions and new channels with the fork's opt-in `SIGHASH_UNIFIED` digest, so post-fork channels funded from post-fork coins are signed in a way the pre-fork rules reject, and cannot be replayed on the SHA256d chain.
+This is the `#blake` flavor of the package. It builds a fork of Core Lightning v26.06.7 that parses the 164-byte BLAKE2b block header, which the stock build cannot: a stock node stops at the fork's activation block. It also signs wallet transactions and new channels with the fork's opt-in `SIGHASH_UNIFIED` digest, so channels funded past activation from post-activation coins are signed in a way the pre-fork rules reject, and cannot be replayed on the SHA256d chain.
 
 See [BLAKE2b Hard Fork Support](#blake2b-hard-fork-support) for what that changes, including the peers you can connect to and the coins you should fund channels from.
 
@@ -255,9 +255,9 @@ This build reads both forms. It also signs wallet transactions and new channels 
 
 Four consequences worth knowing:
 
-- **The node will not connect to a peer that does not follow the fork.** It advertises a required feature bit. That is deliberate: it stops you opening a channel with a peer who cannot follow the chain. It also means you cannot cooperatively close a channel opened before the fork with a counterparty still on the pre-fork rules.
+- **The node will not connect to a peer that is still on the pre-fork rules.** It advertises a required feature bit. That is deliberate: it stops you opening a channel with a peer that cannot follow the chain past activation. It also means you cannot cooperatively close a channel opened before activation with a counterparty still on the pre-fork rules.
 - **The feature numbers are provisional.** They are not registered BOLT allocations and are expected to move. Channels opened under the current numbering may have to be closed and reopened once they are settled.
-- **Fund channels only from coins received after the fork.** A channel funded from a pre-fork UTXO has a funding transaction valid under both rule sets, so it is valid under both rule sets, which reopens the exposure unified signing exists to close.
+- **Fund channels only from coins received past activation.** A channel funded from a pre-fork UTXO has a funding transaction valid under both rule sets, so it is valid under both rule sets, which reopens the exposure unified signing exists to close.
 - **Downgrading is refused.** A build without unified signing computes a different signature hash and could not close the channels this one opens, so the package declares the downgrade impossible rather than letting you strand a channel.
 
 ## Limitations and Differences
