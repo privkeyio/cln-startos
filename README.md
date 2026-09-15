@@ -255,7 +255,7 @@ This build reads both forms. It also signs wallet transactions and new channels 
 
 Four consequences worth knowing:
 
-- **The node will not connect to a peer that has not adopted the fork.** It advertises a required feature bit. That is deliberate: it stops you opening a channel with a peer who cannot follow the chain. It also means you cannot cooperatively close a channel opened before the fork with a counterparty still on the pre-fork rules.
+- **The node will not connect to a peer that does not follow the fork.** It advertises a required feature bit. That is deliberate: it stops you opening a channel with a peer who cannot follow the chain. It also means you cannot cooperatively close a channel opened before the fork with a counterparty still on the pre-fork rules.
 - **The feature numbers are provisional.** They are not registered BOLT allocations and are expected to move. Channels opened under the current numbering may have to be closed and reopened once they are settled.
 - **Fund channels only from coins received after the fork.** A channel funded from a pre-fork UTXO has a funding transaction valid under both rule sets, so it is valid under both rule sets, which reopens the exposure unified signing exists to close.
 - **Downgrading is refused.** A build without unified signing computes a different signature hash and could not close the channels this one opens, so the package declares the downgrade impossible rather than letting you strand a channel.

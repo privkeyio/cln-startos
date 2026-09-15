@@ -11,11 +11,11 @@ This build adds SIGHASH_UNIFIED signing for the wallet and for new channels. A c
 
 ## Read this before opening channels
 
-The node signals a required feature bit, so it will not connect to a Lightning node that has not adopted the fork. That is deliberate: it stops you opening a channel with a peer who cannot follow the chain. It also means you cannot cooperatively close a channel opened before the fork with a counterparty still on the pre-fork rules.
+The node signals a required feature bit, so it will not connect to a Lightning node that does not follow the fork. That is deliberate: it stops you opening a channel with a peer who cannot follow the chain. It also means you cannot cooperatively close a channel opened before the fork with a counterparty still on the pre-fork rules.
 
 The feature numbers are provisional and are expected to change. Channels opened now may have to be closed and reopened once they are settled. Fund channels only from coins received after the fork.
 
-The web interface talks to the node over CLNrest. Earlier builds used commando, which rides the Lightning peer protocol, and this build refuses peers that have not adopted the fork, so the dashboard could not connect.
+The web interface talks to the node over CLNrest. Earlier builds used commando, which rides the Lightning peer protocol, and this build refuses peers that do not follow the fork, so the dashboard could not connect.
 
 Your node's configuration does not change.`,
   },
