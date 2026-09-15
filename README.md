@@ -257,7 +257,7 @@ Four consequences worth knowing:
 
 - **The node will not connect to a peer that is still on the pre-fork rules.** It advertises a required feature bit. That is deliberate: it stops you opening a channel with a peer that cannot follow the chain past activation. It also means you cannot cooperatively close a channel opened before activation with a counterparty still on the pre-fork rules.
 - **The feature numbers are provisional.** They are not registered BOLT allocations and are expected to move. Channels opened under the current numbering may have to be closed and reopened once they are settled.
-- **Fund channels only from coins received past activation.** A channel funded from a pre-fork UTXO has a funding transaction valid under both rule sets, so it is valid under both rule sets, which reopens the exposure unified signing exists to close.
+- **Fund channels only from coins received past activation.** A channel funded from a pre-fork UTXO has a funding transaction valid under both rule sets, which reopens the exposure unified signing exists to close.
 - **Downgrading is refused.** A build without unified signing computes a different signature hash and could not close the channels this one opens, so the package declares the downgrade impossible rather than letting you strand a channel.
 
 ## Limitations and Differences
