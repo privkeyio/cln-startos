@@ -201,6 +201,11 @@ export const main = sdk.setupMain(async ({ effects }) => {
           APP_CONFIG_FILE: `${rootDir}/data/app/config.json`,
           APP_LOG_FILE: `${rootDir}/data/app/application-cln.log`,
           LIGHTNING_VARS_FILE: `${rootDir}/.commando-env`,
+          // Talk to lightningd over CLNrest, not commando. Commando rides the
+          // Lightning peer protocol, and this build advertises a required
+          // feature bit, so it refuses any peer that does not also adopt the
+          // fork. The UI is not such a peer and would be disconnected.
+          APP_CONNECT: 'REST',
           LIGHTNING_WS_PORT: String(wsPort),
           LIGHTNING_REST_PORT: String(clnrestPort),
           // clnrest runs plaintext (clnrest-protocol=http); the app defaults
