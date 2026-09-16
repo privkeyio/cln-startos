@@ -131,6 +131,20 @@ export const shape = z.object({
   'clboss-max-channel': iniNumber,
 })
 
+export const clbossPlugin = '/usr/local/libexec/c-lightning/plugins/clboss'
+
+// CLBOSS buys inbound liquidity through a submarine swap service that settles on
+// the SHA256d chain, so the binary is no longer shipped. Strip it from configs
+// that enabled it, otherwise lightningd exits on a plugin it cannot find.
+export const dropClboss = (plugins: string[]) => ({
+  plugin: plugins.filter((p) => p !== clbossPlugin),
+  'clboss-min-onchain': undefined,
+  'clboss-auto-close': undefined,
+  'clboss-zerobasefee': undefined,
+  'clboss-min-channel': undefined,
+  'clboss-max-channel': undefined,
+})
+
 const { InputSpec, Value } = sdk
 
 export const fullConfigSpec = InputSpec.of({

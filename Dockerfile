@@ -8,28 +8,6 @@ RUN apt-get update -qq && \
     curl && \
     rm -rf /var/lib/apt/lists/*
 
-# clboss builder
-FROM base AS clboss
-RUN apt-get update -qq && \
-    apt-get install -qq -y --no-install-recommends \
-    autoconf-archive \
-    automake \
-    libcurl4-gnutls-dev \
-    libev-dev \
-    libsqlite3-dev \
-    libtool \
-    libunwind-dev && \
-    rm -rf /var/lib/apt/lists/*
-
-COPY clboss/. /tmp/clboss
-WORKDIR /tmp/clboss
-RUN autoreconf -i && \
-    ./configure && \
-    ./generate_commit_hash.sh && \
-    make -j$(nproc) && \
-    make install && \
-    strip /usr/local/bin/clboss
-
 # sling - download prebuilt binary
 FROM base AS sling
 ARG TARGETARCH
@@ -138,7 +116,6 @@ RUN apt-get update && \
 
 COPY --from=bitcoin-cli /usr/bin/bitcoin-cli /usr/bin/bitcoin-cli
 COPY --from=lightningd-dist /dist/usr/local /usr/local
-COPY --from=clboss /usr/local/bin/clboss /usr/local/libexec/c-lightning/plugins/
 COPY --from=builder-rust /root/.cargo/bin/teos* /usr/local/bin/
 COPY --from=builder-rust /root/.cargo/bin/watchtower-client /usr/local/libexec/c-lightning/plugins/
 COPY --from=sling /usr/local/bin/sling /usr/local/libexec/c-lightning/plugins/
