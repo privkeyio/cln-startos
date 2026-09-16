@@ -1,0 +1,14 @@
+# The web interface links transactions to blockstream.info, which indexes the
+# SHA256d chain, so a transaction from this node is not there. The URL is baked
+# into the built frontend bundle rather than configurable, so rewrite the host.
+# mempool.guide indexes this chain and uses the same URL shape.
+FROM ghcr.io/elementsproject/cln-application:26.04
+
+RUN set -eu; \
+    n=$(grep -rl 'blockstream\.info' /app/apps/frontend/build/static/js/ | wc -l); \
+    [ "$n" -gt 0 ] || { echo "no blockstream.info found: has the app changed?" >&2; exit 1; }; \
+    grep -rl 'blockstream\.info' /app/apps/frontend/build/static/js/ \
+      | xargs sed -i 's|https://blockstream\.info/|https://mempool.guide/|g'; \
+    ! grep -rq 'blockstream\.info' /app/apps/frontend/build/static/js/ \
+      || { echo "rewrite incomplete" >&2; exit 1; }; \
+    echo "rewrote explorer host in $n file(s)"
