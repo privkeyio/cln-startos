@@ -35,7 +35,7 @@ RUN apt-get update -qq && \
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && \
     rustup toolchain install stable --component rustfmt --allow-downgrade && \
     curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOBUF_VERSION}/protobuf-all-${PROTOBUF_VERSION}.tar.gz && \
-    tar -xzf protobuf-all-${PROTOBUF_VERSION}.tar.gz && \
+    tar --no-same-owner -xzf protobuf-all-${PROTOBUF_VERSION}.tar.gz && \
     cp -r protobuf-${PROTOBUF_VERSION}/src/google /usr/local/include/ && \
     rm -rf protobuf*
 
