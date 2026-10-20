@@ -14,17 +14,17 @@ const removeClboss = async ({ effects }: { effects: T.Effects }) => {
 }
 
 export const current = VersionInfo.of({
-  version: '#blake:26.6.9:0',
+  version: '#blake:26.6.9:1',
   releaseNotes: {
-    en_US: `Core Lightning v26.06.9-blake2b.7, based on upstream v26.06.9. We strongly recommend updating.
+    en_US: `Core Lightning v26.06.9-blake2b.8, based on upstream v26.06.9. We strongly recommend updating.
 
 ## Notes for operators
 
-- Updating from the previous version changes nothing else, and the two versions peer normally.
+- Updating from the previous version upgrades the node's database once, at its first start. The previous version cannot use the upgraded database, so back up before updating if you may need to go back. The two versions peer normally, including splices.
 - If the node stops with "80-byte header", its Bitcoin service is not following BLAKE2b. Point it at one that is.
 - Channels opened with \`v26.06.7-blake2b.1\` to \`.3\` do not use unified signatures. Close them and open new ones.
 
-This release brings upstream's security and stability fixes, including protection against peers crashing the node and against forwarded funds being lost to a late fulfill while a channel shuts down.
+This release brings splice and dual-funding fixes, and on channels with unified signatures it signs our half of HTLC transactions as BOLT 3 requires.
 
 Your node's configuration does not change.`,
   },
@@ -58,6 +58,10 @@ Your node's configuration does not change.`,
       },
       //Arriving from Core Lightning v26.06.8-blake2b.6.
       ['#blake:26.6.8:1']: {
+        up: removeClboss,
+      },
+      //Arriving from Core Lightning v26.06.9-blake2b.7.
+      ['#blake:26.6.9:0']: {
         up: removeClboss,
       },
     },
