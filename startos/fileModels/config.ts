@@ -132,12 +132,17 @@ export const shape = z.object({
 })
 
 export const clbossPlugin = '/usr/local/libexec/c-lightning/plugins/clboss'
+const watchtowerClientPlugin =
+  '/usr/local/libexec/c-lightning/plugins/watchtower-client'
 
 // CLBOSS buys inbound liquidity through a submarine swap service that settles on
-// the SHA256d chain, so the binary is no longer shipped. Strip it from configs
-// that enabled it, otherwise lightningd exits on a plugin it cannot find.
-export const dropClboss = (plugins: string[]) => ({
-  plugin: plugins.filter((p) => p !== clbossPlugin),
+// the SHA256d chain, and The Eye of Satoshi's tower cannot follow the BLAKE2b
+// chain, so neither binary is shipped. Strip them from configs that enabled
+// them, otherwise lightningd exits on a plugin it cannot find.
+export const dropRemovedPlugins = (plugins: string[]) => ({
+  plugin: plugins.filter(
+    (p) => p !== clbossPlugin && p !== watchtowerClientPlugin,
+  ),
   'clboss-min-onchain': undefined,
   'clboss-auto-close': undefined,
   'clboss-zerobasefee': undefined,
@@ -444,3 +449,15 @@ export const clnConfig = FileHelper.raw<FormData>(
   },
   (data) => fullConfigSpec.partialValidator.parse(data),
 )
+
+// Every init and every update edge runs this, so a restored or updated config
+// never names a plugin that is no longer shipped.
+export const removeDroppedPlugins = async (effects: T.Effects) => {
+  const form = await clnConfig.read().once()
+  const plugins = (form?.raw?.plugin ?? []).filter(
+    (p): p is string => typeof p === 'string',
+  )
+  await clnConfig.merge(effects, {
+    raw: { ...(form?.raw ?? {}), ...dropRemovedPlugins(plugins) },
+  })
+}

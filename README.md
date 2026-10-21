@@ -9,9 +9,9 @@
 > upstream documentation is accurate and fully applicable — see the
 > Documentation section of `instructions.md` for links.
 
-[Core Lightning](https://github.com/ElementsProject/lightning) is a Lightning Network node implementation. This package builds it with three plugins built into the image, runs a web UI alongside it, and can act as, or subscribe to, a BOLT13 watchtower.
+[Core Lightning](https://github.com/ElementsProject/lightning) is a Lightning Network node implementation. This package builds it with the Sling plugin built into the image and runs a web UI alongside it. It does not include a watchtower: The Eye of Satoshi's tower cannot follow the BLAKE2b chain, so the watchtower returns once it supports BLAKE2b.
 
-This is the `#blake` flavor of the package. It builds Core Lightning v26.06.8 with support for the 164-byte BLAKE2b block header, which the stock build cannot parse: a stock node stops at the activation block. It also signs wallet transactions and new channels with the opt-in `SIGHASH_UNIFIED` digest, so a channel funded past activation from coins received past activation is signed in a way a node that has not upgraded rejects.
+This is the `#blake` flavor of the package. It builds Core Lightning v26.06.9 with support for the 164-byte BLAKE2b block header, which the stock build cannot parse: a stock node stops at the activation block. It also signs wallet transactions and new channels with the opt-in `SIGHASH_UNIFIED` digest, so a channel funded past activation from coins received past activation is signed in a way a node that has not upgraded rejects.
 
 See [BLAKE2b Hard Fork Support](#blake2b-hard-fork-support) for what that changes, including the peers you can connect to and the coins you should fund channels from.
 
@@ -48,11 +48,11 @@ Two images. The node's is built here: a signed release tarball is unpacked onto 
 | Architectures | x86_64, aarch64 — both images declare `emulateMissingAs: 'aarch64'`                               |
 | Entrypoint    | `lightningd` with an explicit config path; the UI runs its own server                             |
 
-Three plugins are dropped into the plugin directory at build time: **CLBOSS** (automated channel management) and **watchtower-client**/**teosd** from rust-teos (BOLT13 watchtower, both client and server) are compiled from their git submodules, and **sling** (rebalancing) is an upstream release binary pinned by `SLING_VERSION` in the `Dockerfile`. Nothing is fetched at runtime, so the image is self-contained.
+One plugin is dropped into the plugin directory at build time: **sling** (rebalancing), an upstream release binary pinned by `SLING_VERSION` and its sha256 in the `Dockerfile`. Nothing is fetched at runtime, so the image is self-contained.
 
 | Subcontainer          | Purpose                                                                         |
 | --------------------- | ------------------------------------------------------------------------------- |
-| `lightning-sub`       | `lightningd`, the watchtower server, and every oneshot — the one to `attach` to |
+| `lightning-sub`       | `lightningd` and every oneshot, the one to `attach` to                          |
 | `cln-application-sub` | The web UI, which talks to the node over its RPC and rune                       |
 
 ## Volume and Data Layout
@@ -61,22 +61,19 @@ One volume, holding everything.
 
 | Volume | Mount Point        | Purpose                                                                                                                                |
 | ------ | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `main` | `/root/.lightning` | The lightning directory: `config`, the node's `hsm_secret` and channel database, the UI's own data, the watchtower's, and `store.json` |
+| `main` | `/root/.lightning` | The lightning directory: `config`, the node's `hsm_secret` and channel database, the UI's own data, and `store.json`                    |
 
-Bitcoin's data directory is mounted **read-only** at `/mnt/bitcoin`, which is how both `lightningd` and the watchtower read its RPC cookie without a password ever being stored.
-
-The watchtower client's own database is deliberately relocated onto this volume. Upstream defaults it to the user's home directory, which is not persistent here, and the effect of leaving it there is silent: the client would re-key and forget every registered tower on each container rebuild.
+Bitcoin's data directory is mounted **read-only** at `/mnt/bitcoin`, which is how `lightningd` reads its RPC cookie without a password ever being stored.
 
 ## File Models
 
-Four models. One is the node's own configuration, one is the web UI's, one is the watchtower's, and one is StartOS-side state.
+Three models. One is the node's own configuration, one is the web UI's, and one is StartOS-side state.
 
 | File                    | Format | Modelled                | Written by                                                          |
 | ----------------------- | ------ | ----------------------- | ------------------------------------------------------------------- |
 | `/config`               | INI    | Yes — `FileHelper.raw`  | Every init, the config actions, and `watchHosts` on address changes |
-| `/store.json`           | JSON   | Yes — `FileHelper.json` | Every init, the watchtower and rescan actions, `main`, and restore  |
+| `/store.json`           | JSON   | Yes — `FileHelper.json` | Every init, the rescan action, `main`, and restore                  |
 | `/data/app/config.json` | JSON   | Yes — `FileHelper.json` | Every init, and the Reset UI Password action                        |
-| `/.teos/teos.toml`      | TOML   | Yes — `FileHelper.toml` | Every init                                                          |
 
 ### config
 
@@ -86,19 +83,19 @@ Four models. One is the node's own configuration, one is the web UI's, one is th
 
 **Derived, and rewritten whenever the underlying address changes:** `proxy` (Tor's SOCKS address), `announce-addr` (the onion and public addresses published on the peer interface, or your custom external host in place of the IPs), and `bitcoin-rpcconnect` / `bitcoin-rpcport`. Editing any of these by hand does not stick.
 
-Everything else — alias, colour, fee policy, channel minimums, the plugin selection, CLBOSS's tuning, the experimental flags — is yours, through the config actions. The only override install makes is switching `clnrest` on.
+Everything else — alias, colour, fee policy, channel minimums, the plugin selection, the experimental flags — is yours, through the config actions. The only override install makes is switching `clnrest` on.
 
 Two interactions are worth knowing because they produce a state neither setting explains alone. A **custom external host is dropped rather than written while Tor Only is enabled**: `always-use-proxy` disables lightningd's DNS resolution, and an `announce-addr` it cannot resolve is a fatal startup error rather than a warning — so the package omits it and raises a health check saying so. And **enabling the Clams websocket adds a second `ws::` bind address** rather than replacing the first.
 
 ### store.json
 
-`watchtowerServer` and `watchtowerClients` are the watchtower configuration, `customExternalHosts` the announced address override, and `rescan` and `restore` are one-shot request flags.
+`customExternalHosts` is the announced address override, and `rescan` and `restore` are one-shot request flags.
 
 Those two flags are deliberately **not** cleared when `main` reads them. A session where `lightningd` never comes up must not consume a request, or it vanishes silently — which is how a rescan requested during a crash loop used to be lost. A oneshot clears them only once the node answers RPC, and `main` ignores that clearing write so it does not bounce the service.
 
-### config.json and teos.toml
+### config.json
 
-The web UI's `config.json` carries its display preferences and its password hash. `teos.toml` is entirely enforced apart from Bitcoin's address, which is derived like the node's: every port, bind address, and subscription parameter is a fixed value, so the watchtower is not configurable from here.
+The web UI's `config.json` carries its display preferences and its password hash.
 
 ## Dependencies
 
@@ -126,7 +123,6 @@ Four interfaces always, and three more depending on what is enabled.
 | gRPC            | `grpc`       | api  | 2106 | always                                      |
 | CLNrest         | `clnrest`    | api  | 3010 | when CLNrest is enabled (it is, at install) |
 | Clams Websocket | `websocket`  | api  | 7272 | when the Clams remote websocket is enabled  |
-| TEOS Watchtower | `watchtower` | api  | 9814 | when the watchtower server is enabled       |
 
 **gRPC is passed through, not terminated.** The plugin performs its own mutual TLS, so StartOS must not terminate at the edge — doing so would present the device certificate and strip the client's. The binding is configured for raw passthrough deliberately; a conventional HTTPS binding would look correct and silently break client authentication.
 
@@ -134,7 +130,7 @@ Four interfaces always, and three more depending on what is enabled.
 
 ## Installation and First-Run Flow
 
-Install seeds the four models, switches CLNrest on, and starts the node — there is no wizard, and no credential is asked for. Wallet creation is `lightningd`'s own: it generates `hsm_secret` on first start.
+Install seeds the three models, switches CLNrest on, and starts the node — there is no wizard, and no credential is asked for. Wallet creation is `lightningd`'s own: it generates `hsm_secret` on first start.
 
 The one piece of setup the package performs is the web UI's credential. A oneshot creates a rune scoped to the application and records it alongside the node's public key, regenerating it only if the node's identity changes or the rune is missing. The UI cannot start until that has happened.
 
@@ -142,27 +138,15 @@ The ordering that matters is Bitcoin's: the node starts, but `check-synced` repo
 
 ## Actions
 
-Thirteen actions. Four configure the node, three concern the watchtower, and the rest are recovery and information.
+Ten actions. Three configure the node, and the rest are recovery and information.
 
 ### Configuration — General Settings, Plugins, Experimental Features
 
 Three actions writing `/config`, grouped together. Each writes only the fields it presents, costs seconds plus a restart, and is safe to re-run — the forms are pre-filled from the current file.
 
 - **General Settings** carries node identity, fee policy, channel minimums, Tor Only, the custom external host, and the CLNrest and Clams toggles. Two combinations produce a visible consequence rather than an error: Tor Only with a custom external host drops the host and raises a health check, and the Clams toggle changes the bind addresses.
-- **Plugins** selects which of the built-in plugins load, and carries CLBOSS's tuning.
+- **Plugins** selects whether the built-in Sling plugin loads.
 - **Experimental Features** exposes upstream's experimental flags, which are not standardized across implementations and may break between releases.
-
-### Watchtower Server, Watchtower Info, Watchtower Client Info
-
-**Watchtower Server** turns this node into a BOLT13 tower for others, which starts the `teosd` daemon and publishes an interface. It also registers and de-registers the towers **this** node subscribes to: a tower removed from the list is abandoned on the next start. Once the client has been enabled, `watchtower-client` stays in the config's `plugin` list even after the last tower is removed — it is the only source of `abandontower`, so removing it would strand the registrations it still holds in `watchtowers_db.sql3`.
-
-Each subscribed tower is stored as the user typed it and parsed by `startos/actions/watchtower/towerUri.ts` into the tower id, host, and port that the `watchtower-client` oneshot passes to `registertower` as three arguments. The host keeps any `https://` prefix, which is what makes the plugin talk TLS to that tower; `lightning-cli` would send a bare IPv4 host as a JSON number, so the host is passed pre-quoted. The same module reconstructs the address `listtowers` reports a tower under, so that an entry written without a port or scheme matches the tower already registered instead of being abandoned and re-registered on every start.
-
-- **What it changes:** `watchtowerServer` and `watchtowerClients` in `store.json`, and through them the daemon chain and the exported interfaces.
-- **Cost:** seconds, then a restart.
-- **Repeat safety:** safe both ways.
-
-**Watchtower Info** and **Watchtower Client Info** are read-only, available only while running, and each is hidden unless the corresponding side is enabled: the first reports this node's tower identity, the second the towers it is subscribed to.
 
 ### Create Rune, Revoke All Runes
 
@@ -214,14 +198,13 @@ The reason is that a restored node reports an **on-chain balance of zero** until
 
 ## Health Checks
 
-Between three and five checks, plus one that appears only after a restore.
+Three or four checks, plus one that appears only after a restore.
 
 | Check                  | Displayed                     | Method                                               | Present                                   |
 | ---------------------- | ----------------------------- | ---------------------------------------------------- | ----------------------------------------- |
 | `lightningd`           | "RPC Interface"               | `lightning-cli getinfo` succeeds                     | always                                    |
 | `cln-application`      | "Web Interface"               | The UI's port is listening                           | always                                    |
 | `check-synced`         | "Synced"                      | `getinfo`'s sync warnings, and Bitcoin's block count | always                                    |
-| `watchtower-server`    | "TEOS Watchtower Server"      | `teos-cli gettowerinfo` succeeds                     | while the watchtower server is enabled    |
 | `custom-external-host` | "Custom External Host"        | Always fails, with an explanation                    | while Tor Only and a custom host conflict |
 | `restored`             | "Backup Restoration Detected" | Always fails, with an explanation                    | after an emergency recovery               |
 
@@ -234,7 +217,7 @@ Between three and five checks, plus one that appears only after a restore.
 The `main` volume is copied wholesale — `sdk.Backups.ofVolumes('main')` — but the exclusions are the substance, because **the channel database is deliberately not backed up.**
 
 - **Excluded:** `lightningd.sqlite3` and its write-ahead sidecars, the RPC socket, the gossip store, and the application log.
-- **Included:** `hsm_secret`, `config`, `store.json`, the emergency-recovery file, the watchtower's data, and the UI's settings.
+- **Included:** `hsm_secret`, `config`, `store.json`, the emergency-recovery file, and the UI's settings.
 
 Restoring a Lightning node's channel database is dangerous — a stale copy claims a channel state the network has moved past — so this package does not restore one. What comes back is the node's identity and enough to recover funds, not a resumable node.
 
@@ -267,7 +250,7 @@ Four consequences worth knowing:
 3. **CLNrest is served as plaintext by the node**, with TLS added at the edge for LAN and clearnet only.
 4. **gRPC cannot be reached through a TLS-terminating path**, because the plugin authenticates clients with their own certificates.
 5. **A custom external host is incompatible with Tor Only** and is dropped while both are set.
-6. **The watchtower is not configurable.** Its ports, bind addresses, and subscription parameters are fixed.
+6. **No watchtower.** The Eye of Satoshi's tower cannot follow the BLAKE2b chain, so neither the tower nor its client is shipped.
 7. **Plugins are those built into the image.** Adding another means changing the image, not dropping a file on the volume.
 8. **No riscv64 build**, and on hardware without a native image the aarch64 build runs emulated.
 
@@ -282,7 +265,7 @@ architectures:
   - x86_64
   - aarch64
 subcontainers:
-  - lightning-sub # lightningd, teosd, and every oneshot; the one to attach to
+  - lightning-sub # lightningd and every oneshot; the one to attach to
   - cln-application-sub # the web UI
 volumes:
   main: /root/.lightning
@@ -290,9 +273,7 @@ file_models:
   - /root/.lightning/config
   - /root/.lightning/store.json
   - /root/.lightning/data/app/config.json
-  - /root/.lightning/.teos/teos.toml
 startos_managed_env_vars:
-  - TOWERS_DATA_DIR # lightningd
   - BITCOIN_NETWORK # web UI
   - LIGHTNING_DATA_DIR # web UI
   - APP_PROTOCOL # web UI
@@ -314,14 +295,10 @@ interfaces:
   grpc: { type: api, port: 2106 } # TLS passthrough, not terminated
   clnrest: { type: api, port: 3010 } # when enabled; URL carries the rune
   websocket: { type: api, port: 7272 } # when the Clams websocket is enabled
-  watchtower: { type: api, port: 9814 } # when the watchtower server is enabled
 actions:
   - config
   - plugins
   - experimental
-  - watchtower
-  - watchtower-info # hidden unless the server is enabled
-  - watchtower-client-info # hidden unless clients are registered
   - createrune
   - revoke-runes
   - display-seed # hidden with no wallet; disabled on a pre-BIP-39 wallet
@@ -335,7 +312,6 @@ health_checks:
   - lightningd # displayed "RPC Interface"
   - cln-application # displayed "Web Interface"
   - check-synced # displayed "Synced"
-  - watchtower-server # when the watchtower server is enabled
   - custom-external-host # only while Tor Only conflicts with a custom host
   - restored # only after an emergency recovery
 ```

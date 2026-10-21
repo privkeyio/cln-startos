@@ -10,7 +10,6 @@ export const wsPort = 4269
 export const rpcPort = 8080
 export const peerPort = 9735
 export const clnrestPort = 3010
-export const watchtowerPort = 9814
 export const websocketPort = 7272
 export const grpcPort = 2106
 
