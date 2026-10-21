@@ -83,6 +83,9 @@ RUN set -eu; \
 
 # Final stage - simplified
 #
+# `ca-certificates` gives the slim base a CA store, which the currency-rate
+# plugin needs for its TLS requests.
+#
 # `libpq5` and `libsodium23` are lightningd's own runtime deps, previously
 # supplied by the upstream image.
 FROM debian:bookworm-slim AS final

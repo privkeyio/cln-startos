@@ -40,7 +40,7 @@ See [BLAKE2b Hard Fork Support](#blake2b-hard-fork-support) for what that change
 
 ## Image and Container Runtime
 
-Two images. The node's is built here: a signed release tarball is unpacked onto a slim Debian base and three extra plugins are added; the web UI's is pulled as published. lightningd comes from the `v26.06.9-blake2b.8` release tarball of `privkeyio/lightning`, with its checksum pinned in the `lightningd-dist` stage and taken from a GPG-verified manifest. `bitcoin-cli` is pinned and checksummed the same way in the `bitcoin-cli` stage: `plugin-bcli` and the `check-synced` health check both exec it, and the image it used to come with no longer supplies it.
+Two images. The node's is built here: a signed release tarball is unpacked onto a slim Debian base and the Sling plugin is added; the web UI's is pulled as published. lightningd comes from the `v26.06.9-blake2b.8` release tarball of `privkeyio/lightning`, with its checksum pinned in the `lightningd-dist` stage and taken from a GPG-verified manifest. `bitcoin-cli` is pinned and checksummed the same way in the `bitcoin-cli` stage: `plugin-bcli` and the `check-synced` health check both exec it, and the image it used to come with no longer supplies it.
 
 | Property      | Value                                                                                             |
 | ------------- | ------------------------------------------------------------------------------------------------- |
@@ -83,7 +83,7 @@ Three models. One is the node's own configuration, one is the web UI's, and one 
 
 **Derived, and rewritten whenever the underlying address changes:** `proxy` (Tor's SOCKS address), `announce-addr` (the onion and public addresses published on the peer interface, or your custom external host in place of the IPs), and `bitcoin-rpcconnect` / `bitcoin-rpcport`. Editing any of these by hand does not stick.
 
-Everything else — alias, colour, fee policy, channel minimums, the plugin selection, the experimental flags — is yours, through the config actions. The only override install makes is switching `clnrest` on.
+Everything else — alias, color, fee policy, channel minimums, the plugin selection, the experimental flags — is yours, through the config actions. The only override install makes is switching `clnrest` on.
 
 Two interactions are worth knowing because they produce a state neither setting explains alone. A **custom external host is dropped rather than written while Tor Only is enabled**: `always-use-proxy` disables lightningd's DNS resolution, and an `announce-addr` it cannot resolve is a fatal startup error rather than a warning — so the package omits it and raises a health check saying so. And **enabling the Clams websocket adds a second `ws::` bind address** rather than replacing the first.
 
@@ -113,7 +113,7 @@ The node additionally **restarts when Bitcoin writes a replacement RPC cookie**,
 
 ## Network Access and Interfaces
 
-Four interfaces always, and three more depending on what is enabled.
+Four interfaces always, and two more depending on what is enabled.
 
 | Interface       | Id           | Type | Port | Present                                     |
 | --------------- | ------------ | ---- | ---- | ------------------------------------------- |
@@ -145,7 +145,7 @@ Ten actions. Three configure the node, and the rest are recovery and information
 Three actions writing `/config`, grouped together. Each writes only the fields it presents, costs seconds plus a restart, and is safe to re-run — the forms are pre-filled from the current file.
 
 - **General Settings** carries node identity, fee policy, channel minimums, Tor Only, the custom external host, and the CLNrest and Clams toggles. Two combinations produce a visible consequence rather than an error: Tor Only with a custom external host drops the host and raises a health check, and the Clams toggle changes the bind addresses.
-- **Plugins** selects whether the built-in Sling plugin loads.
+- **Plugins** toggles CLNrest and selects whether the built-in Sling plugin loads.
 - **Experimental Features** exposes upstream's experimental flags, which are not standardized across implementations and may break between releases.
 
 ### Create Rune, Revoke All Runes
@@ -217,7 +217,7 @@ Three or four checks, plus one that appears only after a restore.
 The `main` volume is copied wholesale — `sdk.Backups.ofVolumes('main')` — but the exclusions are the substance, because **the channel database is deliberately not backed up.**
 
 - **Excluded:** `lightningd.sqlite3` and its write-ahead sidecars, the RPC socket, the gossip store, and the application log.
-- **Included:** `hsm_secret`, `config`, `store.json`, the emergency-recovery file, and the UI's settings.
+- **Included:** `hsm_secret`, `config`, `store.json`, the emergency-recovery file, the UI's settings, and any watchtower data left by an earlier version, which holds its keys.
 
 Restoring a Lightning node's channel database is dangerous — a stale copy claims a channel state the network has moved past — so this package does not restore one. What comes back is the node's identity and enough to recover funds, not a resumable node.
 

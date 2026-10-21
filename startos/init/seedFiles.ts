@@ -9,7 +9,6 @@ export const seedFiles = sdk.setupOnInit(async (effects, kind) => {
 
   if (kind === 'install') {
     await clnConfig.merge(effects, { clnrest: true })
-  } else {
-    await removeDroppedPlugins(effects)
   }
+  await removeDroppedPlugins(effects)
 })

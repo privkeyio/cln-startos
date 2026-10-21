@@ -132,8 +132,6 @@ export const shape = z.object({
 })
 
 export const clbossPlugin = '/usr/local/libexec/c-lightning/plugins/clboss'
-const watchtowerClientPlugin =
-  '/usr/local/libexec/c-lightning/plugins/watchtower-client'
 
 // CLBOSS buys inbound liquidity through a submarine swap service that settles on
 // the SHA256d chain, and The Eye of Satoshi's tower cannot follow the BLAKE2b
@@ -141,7 +139,7 @@ const watchtowerClientPlugin =
 // them, otherwise lightningd exits on a plugin it cannot find.
 export const dropRemovedPlugins = (plugins: string[]) => ({
   plugin: plugins.filter(
-    (p) => p !== clbossPlugin && p !== watchtowerClientPlugin,
+    (p) => p !== clbossPlugin && p.split('/').pop() !== 'watchtower-client',
   ),
   'clboss-min-onchain': undefined,
   'clboss-auto-close': undefined,
