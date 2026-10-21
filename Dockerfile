@@ -12,16 +12,27 @@ RUN apt-get update -qq && \
 FROM base AS sling
 ARG TARGETARCH
 ARG SLING_VERSION=v4.3.1
-RUN apt-get update -qq && apt-get install -qq -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/* && \
-    if [ "$TARGETARCH" = "amd64" ]; then SLING_ARCH=x86_64; else SLING_ARCH=aarch64; fi && \
-    curl -fSL "https://github.com/daywalker90/sling/releases/download/${SLING_VERSION}/sling-${SLING_VERSION}-${SLING_ARCH}-linux-gnu.tar.gz" \
-    | tar xz -C /usr/local/bin/
+ARG SLING_SHA256_AMD64=71dd089d5c1544e7dacc17318fdc70db6802c80db9f5ae8496f19f0ab6a758d5
+ARG SLING_SHA256_ARM64=eef6ee5f6fbe6960b2b999969773f39caba6a4e3818cc7020ba32c1e4f4bb1b4
+RUN apt-get update -qq && apt-get install -qq -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN set -eu; \
+    case "$TARGETARCH" in \
+      amd64) SHA="$SLING_SHA256_AMD64"; SLING_ARCH=x86_64 ;; \
+      arm64) SHA="$SLING_SHA256_ARM64"; SLING_ARCH=aarch64 ;; \
+      *) echo "unsupported TARGETARCH: $TARGETARCH" >&2; exit 1 ;; \
+    esac; \
+    TARBALL="sling-${SLING_VERSION}-${SLING_ARCH}-linux-gnu.tar.gz"; \
+    curl -fsSLO "https://github.com/daywalker90/sling/releases/download/${SLING_VERSION}/${TARBALL}"; \
+    echo "${SHA}  ${TARBALL}" | sha256sum -c -; \
+    tar -xzf "$TARBALL" -C /usr/local/bin/; \
+    rm "$TARBALL"
 
 # rust-teos builder
 FROM base AS builder-rust
 ENV RUST_PROFILE=release \
     PATH="/root/.cargo/bin:/root/.local/bin:$PATH" \
     PROTOBUF_VERSION=21.12 \
+    PROTOBUF_SHA256=2c6a36c7b5a55accae063667ef3c55f2642e67476d96d355ff0acb13dbb47f09 \
     PROTOC=/usr/bin/protoc \
     PROTOC_INCLUDE=/usr/local/include
 
@@ -34,7 +45,8 @@ RUN apt-get update -qq && \
     rm -rf /var/lib/apt/lists/* && \
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && \
     rustup toolchain install stable --component rustfmt --allow-downgrade && \
-    curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOBUF_VERSION}/protobuf-all-${PROTOBUF_VERSION}.tar.gz && \
+    curl -fsSLO https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOBUF_VERSION}/protobuf-all-${PROTOBUF_VERSION}.tar.gz && \
+    echo "${PROTOBUF_SHA256}  protobuf-all-${PROTOBUF_VERSION}.tar.gz" | sha256sum -c - && \
     tar --no-same-owner -xzf protobuf-all-${PROTOBUF_VERSION}.tar.gz && \
     cp -r protobuf-${PROTOBUF_VERSION}/src/google /usr/local/include/ && \
     rm -rf protobuf*
@@ -46,7 +58,7 @@ RUN cargo install --locked --path teos && \
 
 # lightningd, from the signed release tarballs.
 #
-# This is a fork of Core Lightning v26.06.8 that adds support for the 164-byte
+# This is a fork of Core Lightning v26.06.9 that adds support for the 164-byte
 # BLAKE2b block header. Without it a node cannot parse the activation block and
 # dies on the first one.
 #

@@ -1,17 +1,121 @@
 name: Build
 
+# Builds the x86_64 and aarch64 s9pks on native runners for pull requests and
+# vX.Y.Z-blake2b.N tags. Each runner signs with a throwaway key, so these
+# s9pks only prove the tree builds; the release s9pk is packed, signed and
+# published from a local build.
 on:
-  workflow_dispatch:
   pull_request:
     paths-ignore: ['*.md']
     branches: ['master']
+  push:
+    tags:
+      - 'v*-blake2b.*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   build:
-    if: github.event.pull_request.draft == false
-    uses: Start9Labs/start-technologies/.github/workflows/build.yml@master
-    # No DEV_KEY — a PR build doesn't publish, so it doesn't need the signing key.
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: 'x86', runner: 'ubuntu-24.04', cli_sha256: 'f4bb04c96eb63e74d5c14325a2ad03c7576ede0e4189ed18558b3915c8e4a6c0' }
+          - { target: 'arm', runner: 'ubuntu-24.04-arm', cli_sha256: 'b016df4cb661870bdf20626934b5673e54f261ff996dab0caeadf6ad008662bf' }
+    steps:
+      # The package sits one level down so the throwaway key below stays
+      # outside the checkout.
+      - name: Git checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: pkg
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+
+      - name: Install build tools
+        run: |
+          # The runner's Microsoft apt sources fail intermittently and fail the whole update.
+          grep -rl 'packages\.microsoft\.com' /etc/apt/sources.list.d/ | sudo xargs -r rm -f || true
+          sudo apt-get update -qq
+          sudo apt-get install -qq -y --no-install-recommends squashfs-tools squashfs-tools-ng
+
+      # start-cli runs `docker image inspect --platform`, which needs Docker 28.1
+      # or later; the runner image ships 28.0.4.
+      - name: Set up Docker
+        uses: docker/setup-docker-action@2bf61fb9464cc67f0cbdeabed6aa0380accd1c70 # v5.5.0
+        with:
+          version: v29.9.1
+
+      # start-cli exports each image with `docker buildx build -o type=docker,dest=-`,
+      # which the runner's default docker driver does not support.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: image=moby/buildkit:v0.34.1@sha256:99368f3e46177c6405b9740e4461d91cee004128daeecca78d4ceac50ec1da5c
+
+      - name: Install start-cli
+        env:
+          CLI_VERSION: '2.3.0'
+          CLI_SHA256: ${{ matrix.cli_sha256 }}
+        run: |
+          ASSET="start-cli_$(uname -m)-linux"
+          curl -fsSLo "$RUNNER_TEMP/$ASSET" "https://github.com/Start9Labs/start-technologies/releases/download/start-cli/v${CLI_VERSION}/${ASSET}"
+          echo "${CLI_SHA256}  $RUNNER_TEMP/$ASSET" | sha256sum -c -
+          sudo install -m 755 "$RUNNER_TEMP/$ASSET" /usr/local/bin/start-cli
+          start-cli --version
+
+      - name: Create throwaway build key
+        run: |
+          start-cli init-key
+          mkdir -p .startos
+          cp ~/.startos/id.key.pem .startos/build.key.pem
+
+      - name: Install package dependencies
+        working-directory: pkg
+        run: npm ci
+
+      - name: Build
+        working-directory: pkg
+        run: make ${{ matrix.target }}
+
+      # Renamed so a CI build, signed by a throwaway key, is never taken for a release.
+      - name: Summarize
+        working-directory: pkg
+        run: |
+          S9PK=(c-lightning_*.s9pk)
+          [ ${#S9PK[@]} -eq 1 ] && [ -f "${S9PK[0]}" ] || { echo "::error::expected one s9pk, found: ${S9PK[*]}"; exit 1; }
+          OUT="${S9PK[0]%.s9pk}-ci-untrusted.s9pk"
+          mv "${S9PK[0]}" "$OUT"
+          {
+            echo '```'
+            start-cli s9pk inspect "$OUT" manifest | jq -r '"\(.id) \(.version) \(.gitHash)"'
+            sha256sum "$OUT"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload s9pk
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ci-untrusted-s9pk-${{ matrix.target }}
+          path: pkg/c-lightning_*-ci-untrusted.s9pk
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
