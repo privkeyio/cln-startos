@@ -62,6 +62,8 @@ For each independent upstream source below: a link to its canonical repo, one co
 
 ### TEOS (watchtower)
 
+- Not shipped: The Eye of Satoshi's tower cannot follow the BLAKE2b chain. The submodule is kept for the port that adds it.
+- When it returns, start the client on a fresh data directory rather than `/root/.lightning/.watchtower`: the client reloads every tower in its old database at startup and resumes those registrations on its own.
 - Upstream: [talaia-labs/rust-teos](https://github.com/talaia-labs/rust-teos).
 - The newest release, `v0.2.0`, is from 2023 and the pin sits well past it on `master`, so move the pin along `master` and check any candidate is a descendant of the current one:
   ```sh
@@ -99,7 +101,7 @@ For each independent upstream source below: a link to its canonical repo, one co
 
 ### TEOS
 
-- `cd rust-teos && git fetch --tags && git checkout <new ref> && cd .. && git add rust-teos`.
+- Only once it is shipped again. `cd rust-teos && git fetch --tags && git checkout <new ref> && cd .. && git add rust-teos`.
 
 ### Sling
 

@@ -27,35 +27,6 @@ RUN set -eu; \
     tar -xzf "$TARBALL" -C /usr/local/bin/; \
     rm "$TARBALL"
 
-# rust-teos builder
-FROM base AS builder-rust
-ENV RUST_PROFILE=release \
-    PATH="/root/.cargo/bin:/root/.local/bin:$PATH" \
-    PROTOBUF_VERSION=21.12 \
-    PROTOBUF_SHA256=2c6a36c7b5a55accae063667ef3c55f2642e67476d96d355ff0acb13dbb47f09 \
-    PROTOC=/usr/bin/protoc \
-    PROTOC_INCLUDE=/usr/local/include
-
-RUN apt-get update -qq && \
-    apt-get install -qq -y --no-install-recommends \
-    autoconf automake ca-certificates dirmngr gettext \
-    gnupg jq libpq-dev libtool libffi-dev libssl-dev \
-    protobuf-compiler libev-dev libevent-dev \
-    qemu-user-static wget unzip tclsh && \
-    rm -rf /var/lib/apt/lists/* && \
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && \
-    rustup toolchain install stable --component rustfmt --allow-downgrade && \
-    curl -fsSLO https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOBUF_VERSION}/protobuf-all-${PROTOBUF_VERSION}.tar.gz && \
-    echo "${PROTOBUF_SHA256}  protobuf-all-${PROTOBUF_VERSION}.tar.gz" | sha256sum -c - && \
-    tar --no-same-owner -xzf protobuf-all-${PROTOBUF_VERSION}.tar.gz && \
-    cp -r protobuf-${PROTOBUF_VERSION}/src/google /usr/local/include/ && \
-    rm -rf protobuf*
-
-COPY ./rust-teos /tmp/rust-teos
-WORKDIR /tmp/rust-teos
-RUN cargo install --locked --path teos && \
-    cargo install --locked --path watchtower-plugin
-
 # lightningd, from the signed release tarballs.
 #
 # This is a fork of Core Lightning v26.06.9 that adds support for the 164-byte
@@ -112,9 +83,8 @@ RUN set -eu; \
 
 # Final stage - simplified
 #
-# `ca-certificates` is load-bearing: the slim base carries no CA store, and none
-# of the -dev packages below pull one in. Without it watchtower-client cannot
-# build an HTTPS client, so no tower ever registers (see README.md).
+# `ca-certificates` gives the slim base a CA store, which the currency-rate
+# plugin needs for its TLS requests.
 #
 # `libpq5` and `libsodium23` are lightningd's own runtime deps, previously
 # supplied by the upstream image.
@@ -127,6 +97,4 @@ RUN apt-get update && \
 
 COPY --from=bitcoin-cli /usr/bin/bitcoin-cli /usr/bin/bitcoin-cli
 COPY --from=lightningd-dist /dist/usr/local /usr/local
-COPY --from=builder-rust /root/.cargo/bin/teos* /usr/local/bin/
-COPY --from=builder-rust /root/.cargo/bin/watchtower-client /usr/local/libexec/c-lightning/plugins/
 COPY --from=sling /usr/local/bin/sling /usr/local/libexec/c-lightning/plugins/

@@ -10,7 +10,6 @@ export const wsPort = 4269
 export const rpcPort = 8080
 export const peerPort = 9735
 export const clnrestPort = 3010
-export const watchtowerPort = 9814
 export const websocketPort = 7272
 export const grpcPort = 2106
 
@@ -29,8 +28,8 @@ export const mainMounts = sdk.Mounts.of().mountVolume({
 
 /**
  * bitcoind's RPC bridge address, resolved through `sdk.host.getBridgeAddress` and
- * split into the `{ host, port }` pair lightningd's config, teos.toml, and the
- * sync health check consume. `.const()` stays churn-free: bitcoind's assigned
+ * split into the `{ host, port }` pair lightningd's config and the sync health
+ * check consume. `.const()` stays churn-free: bitcoind's assigned
  * RPC port persists across its updates/restarts, so CLN restarts only if
  * bitcoind is (re)installed on a new port. `null` while bitcoind's binding is
  * absent, so callers omit the address rather than writing a placeholder.

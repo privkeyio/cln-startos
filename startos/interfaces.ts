@@ -1,6 +1,5 @@
 import { clnConfig } from './fileModels/config'
 import { parse } from 'dotenv'
-import { storeJson } from './fileModels/store.json'
 import { i18n } from './i18n'
 import { sdk } from './sdk'
 import {
@@ -9,7 +8,6 @@ import {
   peerPort,
   clnrestPort,
   commandoEnv,
-  watchtowerPort,
   grpcPort,
   websocketPort,
 } from './utils'
@@ -18,10 +16,8 @@ import { FileHelper } from '@start9labs/start-sdk'
 // Host ids (the `sdk.MultiHost.of` groups) for the hosts we look up via
 // `sdk.host.getOwn`; distinct from the interface ids exported on them.
 export const peerHostId = 'peer'
-export const watchtowerHostId = 'watchtower'
 
 export const peerInterfaceId = 'peer'
-export const teosInterfaceId = 'watchtower'
 
 export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
   const receipts = []
@@ -193,39 +189,6 @@ export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
     })
     const websocketReceipt = await websocketMultiOrigin.export([websocket])
     receipts.push(websocketReceipt)
-  }
-
-  const watchtowerServerEnabled = await storeJson
-    .read((e) => e.watchtowerServer)
-    .const(effects)
-
-  // watchtower
-  if (watchtowerServerEnabled) {
-    const watchtowerMulti = sdk.MultiHost.of(effects, watchtowerHostId)
-    const watchtowerMultiOrigin = await watchtowerMulti.bindPort(
-      watchtowerPort,
-      {
-        protocol: null,
-        addSsl: null,
-        preferredExternalPort: watchtowerPort,
-        secure: { ssl: false },
-      },
-    )
-    const watchtower = sdk.createInterface(effects, {
-      name: i18n('TEOS Watchtower'),
-      id: teosInterfaceId,
-      description: i18n(
-        'The Eye of Satoshi is a Lightning watchtower compliant with BOLT13, written in Rust.',
-      ),
-      type: 'api',
-      masked: false,
-      schemeOverride: null,
-      username: null,
-      path: '',
-      query: {},
-    })
-    const watchtowerReceipt = await watchtowerMultiOrigin.export([watchtower])
-    receipts.push(watchtowerReceipt)
   }
 
   return receipts

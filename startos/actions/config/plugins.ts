@@ -1,4 +1,8 @@
-import { clnConfig, dropClboss, fullConfigSpec } from '../../fileModels/config'
+import {
+  clnConfig,
+  dropRemovedPlugins,
+  fullConfigSpec,
+} from '../../fileModels/config'
 import { i18n } from '../../i18n'
 import { sdk } from '../../sdk'
 
@@ -64,7 +68,7 @@ export const plugins = sdk.Action.withInput(
 
     await clnConfig.merge(effects, {
       ...rest,
-      raw: { ...(form?.raw ?? {}), ...dropClboss(rawPlugins) },
+      raw: { ...(form?.raw ?? {}), ...dropRemovedPlugins(rawPlugins) },
     })
   },
 )

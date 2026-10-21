@@ -1,13 +1,6 @@
 import { FileHelper } from '@start9labs/start-sdk'
 import { manifest as bitcoinManifest } from 'bitcoin-core-startos/startos/manifest'
 import { readFile, writeFile } from 'fs/promises'
-import {
-  parseTowerUri,
-  towerKey,
-  towerNetAddr,
-} from './actions/watchtower/towerUri'
-import { watchtowerClientPlugin } from './actions/watchtower/watchtower'
-import { ListTowers } from './actions/watchtower/watchtowerClientInfo'
 import { clnConfig } from './fileModels/config'
 import { storeJson } from './fileModels/store.json'
 import { i18n } from './i18n'
@@ -42,10 +35,6 @@ export const main = sdk.setupMain(async ({ effects }) => {
   if (!store) {
     throw new Error('no store.json')
   }
-
-  const watchtowerClientLoaded = !!conf?.raw?.plugin?.includes(
-    watchtowerClientPlugin,
-  )
 
   const lightningdArgs: string[] = ['--database-upgrade=true']
 
@@ -104,11 +93,6 @@ export const main = sdk.setupMain(async ({ effects }) => {
           `--conf=${rootDir}/config`,
           ...lightningdArgs,
         ],
-        // watchtower-client keeps its identity key and registered towers in
-        // watchtowers_db.sql3 under $TOWERS_DATA_DIR, defaulting to
-        // $HOME/.watchtower — outside the only persistent mount. Without this
-        // it re-keys and forgets every tower on each container rebuild.
-        env: { TOWERS_DATA_DIR: `${rootDir}/.watchtower` },
       },
       ready: {
         display: i18n('RPC Interface'),
@@ -309,8 +293,8 @@ export const main = sdk.setupMain(async ({ effects }) => {
       requires: ['lightningd'],
     })
 
-  // Restart on store changes that reconfigure the daemon chain (watchtower
-  // server/clients, custom external hosts) or on a NEW rescan/restore request
+  // Restart on store changes that reconfigure the daemon chain (custom
+  // external hosts) or on a NEW rescan/restore request
   // — setting a flag is what restarts a running service so main can consume
   // it. A rescan/restore transition back to undefined is the consume-flags
   // oneshot clearing an already-consumed request, treated as equal so the
@@ -320,9 +304,6 @@ export const main = sdk.setupMain(async ({ effects }) => {
     .read(
       (s) => s,
       (prev, next) =>
-        prev?.watchtowerServer === next?.watchtowerServer &&
-        JSON.stringify(prev?.watchtowerClients) ===
-          JSON.stringify(next?.watchtowerClients) &&
         JSON.stringify(prev?.customExternalHosts) ===
           JSON.stringify(next?.customExternalHosts) &&
         (next?.rescan === undefined || prev?.rescan === next?.rescan) &&
@@ -330,10 +311,8 @@ export const main = sdk.setupMain(async ({ effects }) => {
     )
     .const(effects)
 
-  // emergency-recover and watchtower-server are added conditionally via thunks so
-  // both can coexist in a single chain. (Previously each `if` rebuilt from
-  // `baseDaemons`, so enabling the watchtower server silently dropped the
-  // emergency-recover oneshot after a restore.)
+  // The restore oneshots are added conditionally via thunks so they stay in a
+  // single chain with everything else.
   return baseDaemons
     .addOneshot('emergency-recover', () =>
       store.restore
@@ -412,177 +391,6 @@ export const main = sdk.setupMain(async ({ effects }) => {
           }
         : null,
     )
-    .addDaemon('watchtower-server', () =>
-      store.watchtowerServer
-        ? {
-            subcontainer: lightningSub,
-            exec: {
-              command: ['teosd', '--datadir=/root/.lightning/.teos'],
-            },
-            ready: {
-              display: i18n('TEOS Watchtower Server'),
-              fn: async () => {
-                const gettowerinfoRes = await lightningSub.exec([
-                  'teos-cli',
-                  '--datadir=/root/.lightning/.teos',
-                  'gettowerinfo',
-                ])
-                if (gettowerinfoRes.exitCode === 0) {
-                  return {
-                    result: 'success',
-                    message: i18n('The Watchtower Server is online'),
-                  }
-                }
-
-                return {
-                  result: 'starting',
-                  message: i18n('TEOSd is starting...'),
-                }
-              },
-            },
-            requires: ['lightningd'],
-          }
-        : null,
-    )
-    .addOneshot('watchtower-client', {
-      subcontainer: lightningSub,
-      exec: {
-        fn: async (subcontainer, abort) => {
-          if (!watchtowerClientLoaded) return null
-
-          const listtowersRes = await subcontainer.exec(
-            ['lightning-cli', 'listtowers'],
-            { cwd: rootDir },
-          )
-
-          if (listtowersRes.exitCode === 0) {
-            const parsedTowers: ListTowers = JSON.parse(
-              listtowersRes.stdout as string,
-            )
-            const registered = new Set(
-              Object.entries(parsedTowers).map(([id, t]) =>
-                towerKey(id, t.net_addr),
-              ),
-            )
-            for (const entry of store.watchtowerClients || []) {
-              if (abort.aborted) break
-              const tower = parseTowerUri(entry)
-              if (!tower) {
-                console.log(
-                  `Watchtower client cannot read ${entry} as <tower id>@<host>:<port>`,
-                )
-                continue
-              }
-              if (registered.has(towerKey(tower.id, towerNetAddr(tower)))) {
-                continue
-              }
-
-              console.log(`Watchtower client adding ${entry}`)
-              // The host goes over as a JSON string literal because
-              // lightning-cli leaves an argument that reads as a number
-              // unquoted, which would send an IPv4 host as malformed JSON.
-              const res = await subcontainer.exec(
-                [
-                  'lightning-cli',
-                  'registertower',
-                  tower.id,
-                  JSON.stringify(tower.host),
-                  String(tower.port),
-                ],
-                { cwd: rootDir },
-                undefined,
-                {
-                  abort: abort.reason,
-                  signal: abort,
-                },
-              )
-
-              if (
-                res.exitCode === 0 &&
-                res.stdout !== '' &&
-                typeof res.stdout === 'string'
-              ) {
-                console.log(`Result adding tower ${entry}: ${res.stdout}`)
-              } else {
-                console.log(
-                  `Error adding tower ${entry}: ${String(res.stderr)}`,
-                )
-              }
-            }
-          } else {
-            console.log("failed to run 'listtowers':", listtowersRes)
-          }
-          return null
-        },
-      },
-      requires: ['lightningd'],
-    })
-    .addOneshot('abandontowers', {
-      subcontainer: lightningSub,
-      exec: {
-        fn: async (subcontainer, abort) => {
-          if (!watchtowerClientLoaded) return null
-
-          const listtowersRes = await subcontainer.exec(
-            ['lightning-cli', 'listtowers'],
-            { cwd: rootDir },
-          )
-
-          if (listtowersRes.exitCode === 0) {
-            const parsedTowers: ListTowers = JSON.parse(
-              listtowersRes.stdout as string,
-            )
-            const configured = new Set(
-              (store.watchtowerClients || []).flatMap((entry) => {
-                const tower = parseTowerUri(entry)
-                return tower ? [towerKey(tower.id, towerNetAddr(tower))] : []
-              }),
-            )
-            for (const [id, t] of Object.entries(parsedTowers)) {
-              if (abort.aborted) break
-              if (configured.has(towerKey(id, t.net_addr))) continue
-
-              const tower = `${id}@${t.net_addr}`
-              console.log(`Watchtower client removing ${tower}`)
-              const res = await subcontainer.exec(
-                ['lightning-cli', 'abandontower', id],
-                { cwd: rootDir },
-                undefined,
-                {
-                  abort: abort.reason,
-                  signal: abort,
-                },
-              )
-
-              if (
-                res.exitCode === 0 &&
-                res.stdout !== '' &&
-                typeof res.stdout === 'string'
-              ) {
-                console.log(`Result removing tower ${tower}: ${res.stdout}`)
-              } else {
-                console.log(
-                  `Error removing tower ${tower}: ${String(res.stderr)}`,
-                )
-              }
-            }
-          } else {
-            console.log(
-              'Failed to run listtowers while checking for abandoned towers',
-              listtowersRes,
-            )
-          }
-          return null
-        },
-      },
-      // Client-side tower cleanup: runs after watchtower-client to remove towers
-      // no longer in the store, down to and including an empty list. Both are
-      // always registered and skip their work internally, so this ordering
-      // holds. Does NOT need the conditional
-      // watchtower *server* (teosd) — requiring it broke the chain when the
-      // server was disabled (SDK 2.0's Daemons.build enforces requires-ordering).
-      requires: ['lightningd', 'watchtower-client'],
-    })
     .addHealthCheck('custom-external-host', () =>
       conf?.['tor-only'] === true && store.customExternalHosts.length
         ? {

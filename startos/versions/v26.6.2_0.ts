@@ -1,7 +1,6 @@
 import { IMPOSSIBLE, VersionInfo, YAML } from '@start9labs/start-sdk'
 import { readFile, rm } from 'fs/promises'
 import { clnConfig } from '../fileModels/config'
-import { storeJson } from '../fileModels/store.json'
 
 export const v_26_6_2_0 = VersionInfo.of({
   version: '26.6.2:0',
@@ -81,16 +80,8 @@ Notes de version de Core Lightning : https://github.com/ElementsProject/lightnin
       // The old entrypoint wrote config.main -> config on the volume,
       // so the existing INI config persists and is preserved by merge().
       if (configYaml) {
-        const watchtowers = configYaml.watchtowers
-        const wtClient = watchtowers?.['wt-client']
         const experimental = configYaml.advanced?.experimental
         const clboss = configYaml.advanced?.plugins?.clboss
-
-        await storeJson.merge(effects, {
-          watchtowerServer: watchtowers?.['wt-server'] ?? false,
-          watchtowerClients:
-            wtClient?.enabled === 'enabled' ? wtClient['add-watchtowers'] : [],
-        })
 
         const configRaw: Record<string, unknown> = {}
         if (experimental?.['dual-fund']?.enabled === 'enabled') {
