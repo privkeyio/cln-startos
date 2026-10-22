@@ -12,7 +12,7 @@
 - A **JSON-RPC** interface, a **gRPC** interface, and (when enabled) a **CLNrest** REST interface that publishes a URL containing a pre-generated rune for wallet apps.
 - An optional **Clams Websocket** endpoint for Clams Remote.
 - **Sling** (channel rebalancing), built into the image as a plugin.
-- No watchtower: The Eye of Satoshi's tower cannot follow the BLAKE2b chain, so the watchtower returns once it supports BLAKE2b.
+- No watchtower: The Eye of Satoshi's tower cannot read BLAKE2b block headers, so the watchtower returns once it supports BLAKE2b.
 - A required dependency on **Bitcoin** — install and fully sync Bitcoin first; CLN will not start without it.
 
 ## Getting set up

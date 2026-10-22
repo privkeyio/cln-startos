@@ -39,14 +39,15 @@ export const alertRestore = {
 
 export const short = {
   en_US:
-    'An implementation of the Lightning Network protocol for the BLAKE2b chain.',
+    "An implementation of the Lightning Network protocol that follows Bitcoin's BLAKE2b proof of work.",
   es_ES:
-    'Una implementación del protocolo de Lightning Network para la cadena BLAKE2b.',
+    'Una implementación del protocolo de Lightning Network que sigue la prueba de trabajo BLAKE2b de Bitcoin.',
   de_DE:
-    'Eine Implementierung des Lightning-Netzwerk-Protokolls für die BLAKE2b-Chain.',
-  pl_PL: 'Implementacja protokołu Lightning Network dla łańcucha BLAKE2b.',
+    'Eine Implementierung des Lightning-Netzwerk-Protokolls, die dem BLAKE2b-Proof-of-Work von Bitcoin folgt.',
+  pl_PL:
+    'Implementacja protokołu Lightning Network zgodna z dowodem pracy BLAKE2b w Bitcoinie.',
   fr_FR:
-    'Une implémentation du protocole Lightning Network pour la chaîne BLAKE2b.',
+    'Une implémentation du protocole Lightning Network qui suit la preuve de travail BLAKE2b de Bitcoin.',
 }
 
 export const long = {
