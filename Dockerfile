@@ -33,13 +33,13 @@ RUN set -eu; \
 # BLAKE2b block header. Without it a node cannot parse the activation block and
 # dies on the first one.
 #
-# The hashes come from SHA256SUMS-v26.06.9-blake2b.8, GPG-verified against A47D99B6DB0D715D40C59A2023AE8A8EA7E24E38.
+# The hashes come from SHA256SUMS-v26.06.9-blake2b.9, GPG-verified against A47D99B6DB0D715D40C59A2023AE8A8EA7E24E38.
 FROM base AS lightningd-dist
 ARG TARGETARCH
 ARG CLN_REPO=privkeyio/lightning
-ARG CLN_VERSION=v26.06.9-blake2b.8
-ARG CLN_SHA256_AMD64=b547893c781777368d28a6f58335b3e0963035aec074e884dd97740777b6e58b
-ARG CLN_SHA256_ARM64=44a9f0f40438d16d97a04c0212b37cd26f3b1ec6d13e1dbe5f26e252130816bb
+ARG CLN_VERSION=v26.06.9-blake2b.9
+ARG CLN_SHA256_AMD64=050d6317de4a34197dcbacda8d7c9c0d41e5ff16a11ddb133f86d1fedd675f3d
+ARG CLN_SHA256_ARM64=c73889219610214aab0506068ddb8456e2b330fb9618ba52f405cab9dafd916e
 RUN apt-get update -qq && \
     apt-get install -qq -y --no-install-recommends ca-certificates xz-utils && \
     rm -rf /var/lib/apt/lists/*
