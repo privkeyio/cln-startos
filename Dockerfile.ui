@@ -1,7 +1,7 @@
-# The web interface links transactions to blockstream.info, which indexes the
-# SHA256d chain, so a transaction from this node is not there. The URL is baked
+# The web interface links transactions to blockstream.info, which has not
+# adopted BLAKE2b, so a transaction from this node is not there. The URL is baked
 # into the built frontend bundle rather than configurable, so rewrite the host.
-# mempool.guide indexes this chain and uses the same URL shape.
+# mempool.guide follows BLAKE2b and uses the same URL shape.
 FROM ghcr.io/elementsproject/cln-application:26.04@sha256:78f92a973be7e756ad6b3325262ff689512bd2711c80fd5aac5e7f56eb9fb6d7
 
 RUN set -eu; \

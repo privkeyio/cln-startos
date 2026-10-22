@@ -12,7 +12,7 @@ export const current = VersionInfo.of({
   releaseNotes: {
     en_US: `Core Lightning v26.06.9-blake2b.8, based on upstream v26.06.9. We strongly recommend updating.
 
-The watchtower is removed for now. The Eye of Satoshi's tower cannot follow the BLAKE2b chain, so it cannot watch these channels. Updating turns the watchtower server and client off; they return once it supports BLAKE2b.
+The watchtower is removed for now. The Eye of Satoshi's tower cannot read BLAKE2b block headers, so it cannot watch these channels. Updating turns the watchtower server and client off; they return once it supports BLAKE2b.
 
 ## Notes for operators
 
@@ -38,7 +38,7 @@ This release brings splice and dual-funding fixes, and on channels with unified 
       ['#blake:26.6.7:1']: {
         up: removePlugins,
       },
-      //Arriving from the flavor that shipped CLBOSS and linked to a SHA256d chain explorer.
+      //Arriving from the flavor that shipped CLBOSS and linked to an explorer that has not adopted BLAKE2b.
       ['#blake:26.6.7:2']: {
         up: removePlugins,
       },

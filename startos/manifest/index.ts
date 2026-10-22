@@ -7,7 +7,7 @@ export const manifest = setupManifest({
   license: 'mit',
   packageRepo: 'https://github.com/privkeyio/cln-startos',
   upstreamRepo: 'https://github.com/privkeyio/lightning',
-  marketingUrl: 'https://blockstream.com/lightning',
+  marketingUrl: 'https://github.com/privkeyio/lightning',
   donationUrl: null,
   description: { short, long },
   volumes: ['main'],

@@ -9,7 +9,7 @@
 > upstream documentation is accurate and fully applicable — see the
 > Documentation section of `instructions.md` for links.
 
-[Core Lightning](https://github.com/ElementsProject/lightning) is a Lightning Network node implementation. This package builds it with the Sling plugin built into the image and runs a web UI alongside it. It does not include a watchtower: The Eye of Satoshi's tower cannot follow the BLAKE2b chain, so the watchtower returns once it supports BLAKE2b.
+[Core Lightning](https://github.com/ElementsProject/lightning) is a Lightning Network node implementation. This package builds it with the Sling plugin built into the image and runs a web UI alongside it. It does not include a watchtower: The Eye of Satoshi's tower cannot read BLAKE2b block headers, so the watchtower returns once it supports BLAKE2b.
 
 This is the `#blake` flavor of the package. It builds Core Lightning v26.06.9 with support for the 164-byte BLAKE2b block header, which the stock build cannot parse: a stock node stops at the activation block. It also signs wallet transactions and new channels with the opt-in `SIGHASH_UNIFIED` digest, so a channel funded past activation from coins received past activation is signed in a way a node that has not upgraded rejects.
 
@@ -250,7 +250,7 @@ Four consequences worth knowing:
 3. **CLNrest is served as plaintext by the node**, with TLS added at the edge for LAN and clearnet only.
 4. **gRPC cannot be reached through a TLS-terminating path**, because the plugin authenticates clients with their own certificates.
 5. **A custom external host is incompatible with Tor Only** and is dropped while both are set.
-6. **No watchtower.** The Eye of Satoshi's tower cannot follow the BLAKE2b chain, so neither the tower nor its client is shipped.
+6. **No watchtower.** The Eye of Satoshi's tower cannot read BLAKE2b block headers, so neither the tower nor its client is shipped.
 7. **Plugins are those built into the image.** Adding another means changing the image, not dropping a file on the volume.
 8. **No riscv64 build**, and on hardware without a native image the aarch64 build runs emulated.
 
