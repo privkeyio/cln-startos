@@ -38,7 +38,7 @@ This release brings splice and dual-funding fixes, and on channels with unified 
       ['#blake:26.6.7:1']: {
         up: removePlugins,
       },
-      //Arriving from the flavor that shipped CLBOSS and linked to a SHA256d chain explorer.
+      //Arriving from the flavor that shipped CLBOSS and linked to an explorer that has not adopted BLAKE2b.
       ['#blake:26.6.7:2']: {
         up: removePlugins,
       },

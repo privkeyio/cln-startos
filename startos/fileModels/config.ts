@@ -133,9 +133,9 @@ export const shape = z.object({
 
 export const clbossPlugin = '/usr/local/libexec/c-lightning/plugins/clboss'
 
-// CLBOSS buys inbound liquidity through a submarine swap service that settles on
-// the SHA256d chain, and The Eye of Satoshi's tower cannot follow the BLAKE2b
-// chain, so neither binary is shipped. Strip them from configs that enabled
+// CLBOSS buys inbound liquidity through a submarine swap service that has not
+// adopted BLAKE2b, and The Eye of Satoshi's tower cannot read BLAKE2b block
+// headers, so neither binary is shipped. Strip them from configs that enabled
 // them, otherwise lightningd exits on a plugin it cannot find.
 export const dropRemovedPlugins = (plugins: string[]) => ({
   plugin: plugins.filter(
