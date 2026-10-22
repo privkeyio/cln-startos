@@ -38,13 +38,15 @@ export const alertRestore = {
 }
 
 export const short = {
-  en_US: 'An implementation of the Lightning Network protocol by Blockstream.',
+  en_US:
+    'An implementation of the Lightning Network protocol for the BLAKE2b chain.',
   es_ES:
-    'Una implementación del protocolo de Lightning Network por Blockstream.',
+    'Una implementación del protocolo de Lightning Network para la cadena BLAKE2b.',
   de_DE:
-    'Eine Implementierung des Lightning-Netzwerk-Protokolls von Blockstream.',
-  pl_PL: 'Implementacja protokołu Lightning Network przez Blockstream.',
-  fr_FR: 'Une implémentation du protocole Lightning Network par Blockstream.',
+    'Eine Implementierung des Lightning-Netzwerk-Protokolls für die BLAKE2b-Chain.',
+  pl_PL: 'Implementacja protokołu Lightning Network dla łańcucha BLAKE2b.',
+  fr_FR:
+    'Une implémentation du protocole Lightning Network pour la chaîne BLAKE2b.',
 }
 
 export const long = {
