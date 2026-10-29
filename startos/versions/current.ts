@@ -8,17 +8,20 @@ const removePlugins = ({ effects }: { effects: T.Effects }) =>
   removeDroppedPlugins(effects)
 
 export const current = VersionInfo.of({
-  version: '#blake:26.6.9:3',
+  version: '#blake:26.6.9:4',
   releaseNotes: {
-    en_US: `Core Lightning v26.06.9-blake2b.9, based on upstream v26.06.9. We strongly recommend updating.
+    en_US: `Core Lightning v26.06.9-blake2b.10, based on upstream v26.06.9. We strongly recommend updating.
 
-After a restart, a channel with an unconfirmed splice now watches its current funding output as well as the splice candidates, so a commitment confirmed on that output is handled.
+- The wallet holds a mainnet coinbase output mined at block 979919 or later for 25920 blocks before spending it, matching Bitcoin Knots 29.4.3. Earlier coinbase outputs keep 6480 blocks.
+- Our own transactions pay at least the Bitcoin service's minimum fee when it is above 1 sat/vB, and HTLC penalty and fulfill spends count the witness stack element when sizing their fee.
+- A shutdown requested during a signed splice waits until the splice locks, unless the peer has already sent its shutdown. If a splice candidate confirms after a mutual close, the node publishes its commitment for it and resolves the channel on chain.
+- Blocks from the Bitcoin service are parsed more strictly, and a dual-funded open or splice rejects outputs above the maximum money supply, alone or in total.
 
-The watchtower stays removed for now. The Eye of Satoshi's tower cannot read BLAKE2b block headers, so it cannot watch these channels. Updating from a version that had it turns the watchtower server and client off; they return once it supports BLAKE2b.
+The watchtower stays removed for now. The Eye of Satoshi's tower cannot read BLAKE2b block headers, so it cannot watch these channels. Updating from a version that had it turns the watchtower server and client off. It returns once it supports BLAKE2b.
 
 ## Notes for operators
 
-- Updating from \`#blake:26.6.9:1\` or \`#blake:26.6.9:2\` does not change the database.
+- Updating from \`#blake:26.6.9:1\`, \`#blake:26.6.9:2\` or \`#blake:26.6.9:3\` does not change the database.
 - Updating from a version before \`#blake:26.6.9:1\` upgrades the node's database once, at its first start. That version cannot use the upgraded database, so back up before updating if you may need to go back.
 - If the node stops with "80-byte header", its Bitcoin service is not following BLAKE2b. Point it at one that is.
 - Channels opened with \`v26.06.7-blake2b.1\` to \`.3\` do not use unified signatures. Close them and open new ones.`,
@@ -65,6 +68,10 @@ The watchtower stays removed for now. The Eye of Satoshi's tower cannot read BLA
       },
       //Arriving from Core Lightning v26.06.9-blake2b.8 without the watchtower.
       ['#blake:26.6.9:2']: {
+        up: removePlugins,
+      },
+      //Arriving from Core Lightning v26.06.9-blake2b.9.
+      ['#blake:26.6.9:3']: {
         up: removePlugins,
       },
     },

@@ -40,7 +40,7 @@ See [BLAKE2b Hard Fork Support](#blake2b-hard-fork-support) for what that change
 
 ## Image and Container Runtime
 
-Two images. The node's is built here: a signed release tarball is unpacked onto a slim Debian base and the Sling plugin is added; the web UI's is pulled as published. lightningd comes from the `v26.06.9-blake2b.9` release tarball of `privkeyio/lightning`, with its checksum pinned in the `lightningd-dist` stage and taken from a GPG-verified manifest. `bitcoin-cli` is pinned and checksummed the same way in the `bitcoin-cli` stage: `plugin-bcli` and the `check-synced` health check both exec it, and the image it used to come with no longer supplies it.
+Two images. The node's is built here: a signed release tarball is unpacked onto a slim Debian base and the Sling plugin is added; the web UI's is pulled as published. lightningd comes from the `v26.06.9-blake2b.10` release tarball of `privkeyio/lightning`, with its checksum pinned in the `lightningd-dist` stage and taken from a GPG-verified manifest. `bitcoin-cli` is pinned and checksummed the same way in the `bitcoin-cli` stage: `plugin-bcli` and the `check-synced` health check both exec it, and the image it used to come with no longer supplies it.
 
 | Property      | Value                                                                                             |
 | ------------- | ------------------------------------------------------------------------------------------------- |
