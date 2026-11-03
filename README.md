@@ -274,7 +274,7 @@ Four consequences worth knowing:
 3. **CLNrest is served as plaintext by the node**, with TLS added at the edge for LAN and clearnet only.
 4. **gRPC cannot be reached through a StartOS TLS listener**, terminating or passthrough, because the plugin authenticates clients with their own certificates and its own certificate names only `cln` and `localhost`.
 5. **A custom external host is incompatible with Tor Only** and is dropped while both are set.
-6. **No watchtower.** The Eye of Satoshi's tower cannot read BLAKE2b block headers, so neither the tower nor its client is shipped.
+6. **No watchtower or CLBOSS.** The Eye of Satoshi's tower cannot read BLAKE2b block headers, and CLBOSS buys inbound liquidity through a submarine swap service that has not adopted BLAKE2b, so neither is shipped. Settings an earlier version wrote for either are removed on update.
 7. **Plugins are those built into the image.** Adding another means changing the image, not dropping a file on the volume.
 8. **No riscv64 build**, and on hardware without a native image the aarch64 build runs emulated.
 9. **An `hsm_secret` protected by a passphrase cannot be used.** `hsm-passphrase` (formerly `encrypted-hsm`) prompts on a terminal at startup, which the service does not have. A legacy encrypted secret must be decrypted with `lightning-hsmtool decrypt` before it is copied in.

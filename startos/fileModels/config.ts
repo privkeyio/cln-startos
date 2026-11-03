@@ -147,6 +147,8 @@ export const dropRemovedPlugins = (plugins: string[]) => ({
   'clboss-zerobasefee': undefined,
   'clboss-min-channel': undefined,
   'clboss-max-channel': undefined,
+  // The Splicing toggle is gone, and lightningd drops the option in v27.04.
+  'experimental-splicing': undefined,
 })
 
 const { InputSpec, Value } = sdk

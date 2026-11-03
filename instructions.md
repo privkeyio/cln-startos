@@ -13,6 +13,7 @@
 - An optional **Clams Websocket** endpoint for Clams Remote.
 - **Sling** (channel rebalancing), built into the image as a plugin.
 - No watchtower: The Eye of Satoshi's tower cannot read BLAKE2b block headers, so the watchtower returns once it supports BLAKE2b.
+- No CLBOSS: it buys inbound liquidity through a swap service that has not adopted BLAKE2b, so it returns once that service supports it.
 - A required dependency on the **Knots** flavor of **Bitcoin**. Install and fully sync it first, because CLN will not start without it, and a standard Bitcoin node does not satisfy this package.
 
 ## Getting set up
