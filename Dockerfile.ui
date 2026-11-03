@@ -1,14 +1,18 @@
+ARG IMAGE
+FROM ${IMAGE}
+# Upstream's Node predates the October 2026 security release.
+COPY --from=node:22.23.4-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da /usr/local/bin/node /usr/local/bin/node
+ENV NODE_VERSION=22.23.4
+
 # The web interface links transactions to blockstream.info, which has not
 # adopted BLAKE2b, so a transaction from this node is not there. The URL is baked
 # into the built frontend bundle rather than configurable, so rewrite the host.
 # mempool.guide follows BLAKE2b and uses the same URL shape.
-FROM ghcr.io/elementsproject/cln-application:26.04@sha256:78f92a973be7e756ad6b3325262ff689512bd2711c80fd5aac5e7f56eb9fb6d7
-
 RUN set -eu; \
-    n=$(grep -rl 'blockstream\.info' /app/apps/frontend/build/static/js/ | wc -l); \
+    n=$(grep -rl 'blockstream\.info' /app/apps/frontend/build/ | wc -l); \
     [ "$n" -gt 0 ] || { echo "no blockstream.info found: has the app changed?" >&2; exit 1; }; \
-    grep -rl 'blockstream\.info' /app/apps/frontend/build/static/js/ \
+    grep -rl 'blockstream\.info' /app/apps/frontend/build/ \
       | xargs sed -i 's|https://blockstream\.info/|https://mempool.guide/|g'; \
-    ! grep -rq 'blockstream\.info' /app/apps/frontend/build/static/js/ \
+    ! grep -rq 'blockstream\.info' /app/apps/frontend/build/ \
       || { echo "rewrite incomplete" >&2; exit 1; }; \
     echo "rewrote explorer host in $n file(s)"

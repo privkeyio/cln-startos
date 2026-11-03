@@ -52,13 +52,14 @@ export const nodeInfo = sdk.Action.withoutInput(
     const uriActionResultMembers: T.ActionResultMember[] =
       peerAddresses?.map((url, idx) => {
         return {
-          name: `URI $${idx + 1}`,
+          name: `URI #${idx + 1}`,
           description: i18n(
             'Share this URI with others so they can add your CLN node as a peer',
           ),
           copyable: true,
           masked: true,
           qr: true,
+          launchable: false,
           type: 'single',
           value: `${nodeInfo.id}@${url}`,
         }
@@ -82,6 +83,7 @@ export const nodeInfo = sdk.Action.withoutInput(
             value: nodeInfo.id,
             masked: true,
             qr: true,
+            launchable: false,
             type: 'single',
           },
           {

@@ -40,28 +40,28 @@ See [BLAKE2b Hard Fork Support](#blake2b-hard-fork-support) for what that change
 
 ## Image and Container Runtime
 
-Two images. The node's is built here: a signed release tarball is unpacked onto a slim Debian base and the Sling plugin is added; the web UI's is pulled as published. lightningd comes from the `v26.06.9-blake2b.10` release tarball of `privkeyio/lightning`, with its checksum pinned in the `lightningd-dist` stage and taken from a GPG-verified manifest. `bitcoin-cli` is pinned and checksummed the same way in the `bitcoin-cli` stage: `plugin-bcli` and the `check-synced` health check both exec it, and the image it used to come with no longer supplies it.
+Two images. The node's is built here: a signed release tarball is unpacked onto a slim Debian base and the Sling plugin is added. The web UI's is upstream's, with two changes made by `Dockerfile.ui`: its `node` binary is replaced from `node:22.23.4-bookworm-slim`, a temporary layer that comes out once upstream ships an image on Node 22.23.4 or later, and its transaction links are rewritten from blockstream.info to mempool.guide, which follows BLAKE2b. lightningd comes from the `v26.06.9-blake2b.10` release tarball of `privkeyio/lightning`, with its checksum pinned in the `lightningd-dist` stage and taken from a GPG-verified manifest. `bitcoin-cli` is pinned and checksummed the same way in the `bitcoin-cli` stage, because `plugin-bcli` and the `check-synced` health check both exec it.
 
-| Property      | Value                                                                                             |
-| ------------- | ------------------------------------------------------------------------------------------------- |
-| Images        | Built from `Dockerfile` on `debian:bookworm-slim`, plus `ghcr.io/elementsproject/cln-application` |
-| Architectures | x86_64, aarch64 — both images declare `emulateMissingAs: 'aarch64'`                               |
-| Entrypoint    | `lightningd` with an explicit config path; the UI runs its own server                             |
+| Property      | Value                                                                                                               |
+| ------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Images        | Built from `Dockerfile` on `debian:bookworm-slim`, plus `ghcr.io/elementsproject/cln-application` + `Dockerfile.ui` |
+| Architectures | x86_64, aarch64 — both images declare `emulateMissing: true`                                                        |
+| Entrypoint    | `lightningd` with an explicit config path; the UI runs its own server                                               |
 
-One plugin is dropped into the plugin directory at build time: **sling** (rebalancing), an upstream release binary pinned by `SLING_VERSION` and its sha256 in the `Dockerfile`. Nothing is fetched at runtime, so the image is self-contained.
+The final stage also installs `wireguard-tools`, `iptables` and `iproute2` for the tunnel the hidden Clearnet VPN action brings up, and the manifest sets `virtualNetworking` so the container can create its interface. One plugin is dropped into the plugin directory at build time: **sling** (rebalancing), an upstream release binary pinned by `SLING_VERSION` and its sha256 in the `Dockerfile`. Nothing is fetched at runtime, so the image is self-contained.
 
-| Subcontainer          | Purpose                                                                         |
-| --------------------- | ------------------------------------------------------------------------------- |
-| `lightning-sub`       | `lightningd` and every oneshot, the one to `attach` to                          |
-| `cln-application-sub` | The web UI, which talks to the node over its RPC and rune                       |
+| Subcontainer          | Purpose                                                   |
+| --------------------- | --------------------------------------------------------- |
+| `lightning-sub`       | `lightningd` and every oneshot, the one to `attach` to    |
+| `cln-application-sub` | The web UI, which talks to the node over its RPC and rune |
 
 ## Volume and Data Layout
 
 One volume, holding everything.
 
-| Volume | Mount Point        | Purpose                                                                                                                                |
-| ------ | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `main` | `/root/.lightning` | The lightning directory: `config`, the node's `hsm_secret` and channel database, the UI's own data, and `store.json`                    |
+| Volume | Mount Point        | Purpose                                                                                                              |
+| ------ | ------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| `main` | `/root/.lightning` | The lightning directory: `config`, the node's `hsm_secret` and channel database, the UI's own data, and `store.json` |
 
 Bitcoin's data directory is mounted **read-only** at `/mnt/bitcoin`, which is how `lightningd` reads its RPC cookie without a password ever being stored.
 
@@ -83,13 +83,13 @@ Three models. One is the node's own configuration, one is the web UI's, and one 
 
 **Derived, and rewritten whenever the underlying address changes:** `proxy` (Tor's SOCKS address), `announce-addr` (the onion and public addresses published on the peer interface, or your custom external host in place of the IPs), and `bitcoin-rpcconnect` / `bitcoin-rpcport`. Editing any of these by hand does not stick.
 
-Everything else — alias, color, fee policy, channel minimums, the plugin selection, the experimental flags — is yours, through the config actions. The only override install makes is switching `clnrest` on.
+Everything else — alias, color, fee policy, channel minimums, the Bitcoin retry timeout, the plugin selection, the experimental flags — is yours, through the config actions. The only override install makes is switching `clnrest` on.
 
 Two interactions are worth knowing because they produce a state neither setting explains alone. A **custom external host is dropped rather than written while Tor Only is enabled**: `always-use-proxy` disables lightningd's DNS resolution, and an `announce-addr` it cannot resolve is a fatal startup error rather than a warning — so the package omits it and raises a health check saying so. And **enabling the Clams websocket adds a second `ws::` bind address** rather than replacing the first.
 
 ### store.json
 
-`customExternalHosts` is the announced address override, and `rescan` and `restore` are one-shot request flags.
+`customExternalHosts` is the user-managed announced address override, `clearnetVpn` the Clearnet VPN's WireGuard configuration and companion-managed public address (kept verbatim; `vpn/wg0.conf` is generated from it on every start and never hand-edited), and `rescan` and `restore` are one-shot request flags.
 
 Those two flags are deliberately **not** cleared when `main` reads them. A session where `lightningd` never comes up must not consume a request, or it vanishes silently — which is how a rescan requested during a crash loop used to be lost. A oneshot clears them only once the node answers RPC, and `main` ignores that clearing write so it does not bounce the service.
 
@@ -105,6 +105,8 @@ One, and it is required.
 | ---------- | --------- | --------------------------- | ------------------------- | ------------------------------ |
 | Bitcoin    | `running` | `bitcoind`, `sync-progress` | `/mnt/bitcoin`, read-only | Chain data, and the RPC cookie |
 
+**Only the Knots flavor satisfies it**, from `#knots:29.4.1:4` on. Knots schedules the change of proof of work, so only Knots serves the BLAKE2b headers this build needs, and a standard Bitcoin node does not satisfy the dependency.
+
 Both health checks are required, not just "running": a node that is up but still syncing cannot serve a Lightning node correctly, and the sync state is surfaced again in this package's own [`check-synced`](#health-checks).
 
 Bitcoin's RPC address is resolved from its own binding over the service bridge, so nothing is configured by hand and a Bitcoin update does not move it. When Bitcoin is absent the address keys are cleared rather than left stale, and `lightningd` fails to connect until it returns.
@@ -115,22 +117,22 @@ The node additionally **restarts when Bitcoin writes a replacement RPC cookie**,
 
 Four interfaces always, and two more depending on what is enabled.
 
-| Interface       | Id           | Type | Port | Present                                     |
-| --------------- | ------------ | ---- | ---- | ------------------------------------------- |
-| Web UI          | `ui`         | ui   | 4500 | always                                      |
-| RPC             | `rpc`        | api  | 8080 | always                                      |
-| Peer            | `peer`       | p2p  | 9735 | always                                      |
-| gRPC            | `grpc`       | api  | 2106 | always                                      |
-| CLNrest         | `clnrest`    | api  | 3010 | when CLNrest is enabled (it is, at install) |
-| Clams Websocket | `websocket`  | api  | 7272 | when the Clams remote websocket is enabled  |
+| Interface       | Id          | Type | Port | Present                                     |
+| --------------- | ----------- | ---- | ---- | ------------------------------------------- |
+| Web UI          | `ui`        | ui   | 4500 | always                                      |
+| RPC             | `rpc`       | api  | 8080 | always                                      |
+| Peer            | `peer`      | p2p  | 9735 | always                                      |
+| gRPC            | `grpc`      | api  | 2106 | always                                      |
+| CLNrest         | `clnrest`   | api  | 3010 | when CLNrest is enabled (it is, at install) |
+| Clams Websocket | `websocket` | api  | 7272 | when the Clams remote websocket is enabled  |
 
-**gRPC is passed through, not terminated.** The plugin performs its own mutual TLS, so StartOS must not terminate at the edge — doing so would present the device certificate and strip the client's. The binding is configured for raw passthrough deliberately; a conventional HTTPS binding would look correct and silently break client authentication.
+**gRPC is forwarded as a plain TCP port, with no StartOS TLS listener in front of it.** The plugin performs its own mutual TLS, and its certificate names only `cln` and `localhost`, so every client that verifies it sends `cln` as the TLS server name whatever address it dials. A terminating listener would present the device certificate and strip the client's; a passthrough listener routes by server name and refuses one that is not an address of the interface, which `cln` never is. The binding is a raw forward deliberately — either TLS arrangement would look correct and refuse every client.
 
 **CLNrest carries its own credential in the address.** The interface's URL includes the rune the package generated, and its scheme is overridden to `clnrest+https` or `clnrest+http` so that a wallet reading the scheme knows which transport to use — a bare `clnrest://` is assumed to be TLS, which would be wrong for the Tor address.
 
 ## Installation and First-Run Flow
 
-Install seeds the three models, switches CLNrest on, and starts the node — there is no wizard, and no credential is asked for. Wallet creation is `lightningd`'s own: it generates `hsm_secret` on first start.
+Install seeds the three models and switches CLNrest on — there is no wizard, and no credential is asked for. The service remains stopped until the user starts it; `lightningd` then creates `hsm_secret` on its first start.
 
 The one piece of setup the package performs is the web UI's credential. A oneshot creates a rune scoped to the application and records it alongside the node's public key, regenerating it only if the node's identity changes or the rune is missing. The UI cannot start until that has happened.
 
@@ -138,25 +140,33 @@ The ordering that matters is Bitcoin's: the node starts, but `check-synced` repo
 
 ## Actions
 
-Ten actions. Three configure the node, and the rest are recovery and information.
+Thirteen actions. Three configure the node, two handle payments, one is hidden and exists for a companion package, and the rest are recovery and information.
 
 ### Configuration — General Settings, Plugins, Experimental Features
 
 Three actions writing `/config`, grouped together. Each writes only the fields it presents, costs seconds plus a restart, and is safe to re-run — the forms are pre-filled from the current file.
 
-- **General Settings** carries node identity, fee policy, channel minimums, Tor Only, the custom external host, and the CLNrest and Clams toggles. Two combinations produce a visible consequence rather than an error: Tor Only with a custom external host drops the host and raises a health check, and the Clams toggle changes the bind addresses.
+- **General Settings** carries node identity, fee policy, channel minimums, Tor Only, the custom external host, the Clams toggle, and `bitcoin-retry-timeout` — how long `plugin-bcli` retries a failing `bitcoin-cli` call before `lightningd` exits with `The Bitcoin backend died` (upstream default 60 seconds, which also raises the RPC client timeout to match). Two combinations produce a visible consequence rather than an error: Tor Only with a custom external host drops the host and raises a health check, and the Clams toggle changes the bind addresses.
 - **Plugins** toggles CLNrest and selects whether the built-in Sling plugin loads.
-- **Experimental Features** exposes upstream's experimental flags, which are not standardized across implementations and may break between releases.
+- **Experimental Features** exposes upstream's experimental flags, which are not standardized across implementations and may break between releases. Its dual-funding amounts are written to the `funder-*` options as bare numbers, which the funder plugin reads as satoshis; the lease's `channel-fee-max-base-msat` is the one amount in millisatoshis.
 
 ### Create Rune, Revoke All Runes
 
-**Create Rune** mints an access credential for an external application, with the restrictions you specify. Available only while running; each run produces a new rune and does not affect existing ones.
+**Create Rune** mints an access credential for an external application, with the permissions chosen in its form:
+
+- **Read-only** — Core Lightning's built-in `readonly` set: any `list*` or `get*` command and `summary`, except `listdatastore`.
+- **Custom restrictions** — a JSON array of restrictions as `createrune` takes them, the argument an app's own `lightning-cli createrune restrictions='…'` recipe carries. The action refuses anything but a non-empty array of non-empty arrays of strings: `[]` would mint an unrestricted rune, and Core Lightning stores a rune with an empty restriction that crashes `lightningd` whenever `showrunes`, which Revoke All Runes runs, reads it back. Core Lightning validates the restrictions themselves, and its error is what the action shows.
+- **Unrestricted** — full control of the node, funds included.
+
+Available only while running; each run produces a new rune and does not affect existing ones.
 
 **Revoke All Runes** invalidates every rune this node has issued **including the web UI's**, which is regenerated automatically on the next start. Run it when a credential may have been exposed. It is not selective — that is the point of it — so anything you have connected must be re-authorized afterwards.
 
+If `createrune`, `showrunes` or `blacklistrune` fails, either action shows the error output in a copyable field.
+
 ### Display BIP-39 Seed
 
-Shows the seed words backing the on-chain wallet, for disaster recovery. Note what it is not: the seed alone cannot recover channel funds.
+Shows the 12 seed words backing the on-chain wallet, for disaster recovery, as a numbered grid of three rows in a masked, copyable field. Note what it is not: the seed alone cannot recover channel funds.
 
 - **Visibility:** hidden entirely when no wallet exists yet, and shown as disabled with an explanation on a node whose wallet predates BIP-39 seeds — such a wallet cannot be given one, and moving the funds to a fresh install is the only route.
 - **Repeat safety:** read-only.
@@ -172,15 +182,25 @@ Re-scans the chain for wallet outputs. Run it after a restore, or when an on-cha
 
 ### Reset UI Password
 
-Sets a new password for the web UI, writing its `config.json`. It does not touch the node, its runes, or any external application's access.
+Clears the web UI's password in its `config.json`; whoever next opens the UI sets a new one. It asks for confirmation when a password is set, and does nothing visible when none is. It does not touch the node, its runes, or any external application's access.
 
 ### Delete Gossip Store
 
 Deletes the network gossip database, which the node rebuilds from peers. Run it if gossip is suspected corrupt.
 
-- **Availability:** only while stopped, since the file is open in use.
+- **Availability:** only while stopped, since the file is open in use. Asks for confirmation before running.
 - **Cost:** the node re-learns the network graph after starting, which takes time and affects routing until it does.
 - **Repeat safety:** idempotent.
+
+### Clearnet VPN — hidden
+
+Not user-facing, and raised as a task by a companion package with its tunnel configuration and public address filled in. Its only known uses are the TunnelSats community package and running it by hand with some other WireGuard configuration, which is unsupported. It is not how a node is made reachable or routed: inbound reachability comes from addresses on the node's StartOS interfaces, and outbound traffic leaves through the gateway StartOS selects for it. It stores the companion-managed address separately from `customExternalHosts`; `watchHosts` announces both without overwriting addresses the user configured. It also turns Tor Only off, since Tor Only would suppress the announcement and proxy the clearnet peers the tunnel exists for. Costs a restart. A new configuration replaces the tunnel; an empty one turns it off and drops only the address it had advertised. Safe to repeat.
+
+### Pay Invoice, Receive Payment
+
+Grouped under Payments. **Pay Invoice** pays a BOLT11 invoice from the node's own funds: paste the invoice, whether its amount is stated in it or entered here — an invoice that leaves the amount open requires one, one that states it refuses one — and the most it may spend in routing fees as a percentage. Every payment requires confirmation that the amount and destination were verified. A task-prefilled invoice is decoded before the prompt opens, displays its amount, destination, and description, and cannot be edited; execution rejects an invoice that differs from the reviewed one. It then pays with a 60-second retry window and returns the amount, fee, description, destination and preimage; a failure returns lightningd's reason. Only while running. Not idempotent — running it twice pays twice if the invoice allows it, which a single-use BOLT11 does not. A companion service can raise it as a task with the invoice filled in, so a payment it needs is one reviewed prompt; the node never hands out a rune for it.
+
+**Receive Payment** creates a BOLT11 invoice for this node: an optional amount (none makes an amount-less invoice the payer fills in), an optional description carried in the invoice, and an expiry in hours, default 24. Runs `lightning-cli invoice` under a generated `startos-<uuid>` label; lightningd chooses the route hints. Returns the invoice as text and QR code, plus the payment hash. Only while running. Safe to repeat — each run registers a new invoice and nothing is charged.
 
 ### Node Info
 
@@ -188,27 +208,31 @@ Read-only, running only: the node's identity and current state.
 
 ## Tasks
 
-One task, raised by a restore rather than at install.
+The package raises one task after a restore; a companion package can raise the hidden Clearnet VPN action as another.
 
-| Task              | Severity    | Raised when                        | Cleared when    |
-| ----------------- | ----------- | ---------------------------------- | --------------- |
-| Rescan Blockchain | `important` | Immediately after a backup restore | The action runs |
+| Task              | Severity    | Raised when                                                         | Cleared when                                                         |
+| ----------------- | ----------- | ------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Rescan Blockchain | `important` | Immediately after a backup restore                                  | The action runs                                                      |
+| Clearnet VPN      | `important` | Only when a companion package raises it with a tunnel for this node | The stored configuration matches what the companion package proposes |
 
 The reason is that a restored node reports an **on-chain balance of zero** until the chain is rescanned, and nothing else in the interface explains why. `important` rather than `critical`: the node should keep running — indeed it must, for the rescan to proceed.
 
 ## Health Checks
 
-Three or four checks, plus one that appears only after a restore.
+Three checks are always present, with three more for conditional features or recovery states.
 
 | Check                  | Displayed                     | Method                                               | Present                                   |
 | ---------------------- | ----------------------------- | ---------------------------------------------------- | ----------------------------------------- |
-| `lightningd`           | "RPC Interface"               | `lightning-cli getinfo` succeeds                     | always                                    |
+| `lightningd`           | "RPC Interface"               | `lightning-cli getinfo` succeeds within three tries  | always                                    |
 | `cln-application`      | "Web Interface"               | The UI's port is listening                           | always                                    |
 | `check-synced`         | "Synced"                      | `getinfo`'s sync warnings, and Bitcoin's block count | always                                    |
 | `custom-external-host` | "Custom External Host"        | Always fails, with an explanation                    | while Tor Only and a custom host conflict |
+| `vpn-tunnel`           | "Clearnet VPN"                | Age of the tunnel's last WireGuard handshake         | while a tunnel is configured              |
 | `restored`             | "Backup Restoration Detected" | Always fails, with an explanation                    | after an emergency recovery               |
 
-**`check-synced` distinguishes three states**, which is what makes it worth reading: Bitcoin not yet synced, the node catching up to Bitcoin (reported as a block count against Bitcoin's own), and synced. It fails only when `lightning-cli` itself errors, so a red check here is the node, not the chain.
+**`check-synced` distinguishes three states**, which is what makes it worth reading: Bitcoin not yet synced, the node catching up to Bitcoin (reported as a block count against Bitcoin's own), and synced. It fails only when `lightning-cli` itself errors on three tries in a row, so a red check here is the node, not the chain.
+
+**`vpn-tunnel` reads the tunnel's last handshake.** `starting` until the first one, `failure` once it is more than three minutes old — WireGuard rekeys about every two minutes under traffic. A failing tunnel does not leak: the routing rules the package installs send clearnet traffic nowhere but the tunnel, and drop it if the tunnel's interface goes away, so it is never sent over the ISP connection. The `vpn` oneshot that brings the tunnel up runs before `lightningd` and blocks it if the tunnel cannot be created.
 
 **Two checks are deliberate permanent failures**, used as a way to say something the interface has nowhere else to put. `custom-external-host` reports that an announced address is being suppressed by Tor Only, and names both settings to change. `restored` reports that an emergency recovery has happened and that the node should be drained and reinstalled rather than kept in service — a state that is not a fault in the running software but is a serious one for the operator.
 
@@ -248,11 +272,12 @@ Four consequences worth knowing:
 1. **A restore is a recovery, not a resumption.** Channels are force-closed by design; plan to sweep the funds and reinstall.
 2. **The channel database is excluded from backups**, deliberately.
 3. **CLNrest is served as plaintext by the node**, with TLS added at the edge for LAN and clearnet only.
-4. **gRPC cannot be reached through a TLS-terminating path**, because the plugin authenticates clients with their own certificates.
+4. **gRPC cannot be reached through a StartOS TLS listener**, terminating or passthrough, because the plugin authenticates clients with their own certificates and its own certificate names only `cln` and `localhost`.
 5. **A custom external host is incompatible with Tor Only** and is dropped while both are set.
 6. **No watchtower.** The Eye of Satoshi's tower cannot read BLAKE2b block headers, so neither the tower nor its client is shipped.
 7. **Plugins are those built into the image.** Adding another means changing the image, not dropping a file on the volume.
 8. **No riscv64 build**, and on hardware without a native image the aarch64 build runs emulated.
+9. **An `hsm_secret` protected by a passphrase cannot be used.** `hsm-passphrase` (formerly `encrypted-hsm`) prompts on a terminal at startup, which the service does not have. A legacy encrypted secret must be decrypted with `lightning-hsmtool decrypt` before it is copied in.
 
 ---
 
@@ -260,7 +285,7 @@ Four consequences worth knowing:
 
 ```yaml
 package_id: c-lightning
-image: ./Dockerfile # on debian:bookworm-slim; plus ghcr.io/elementsproject/cln-application
+image: ./Dockerfile # on debian:bookworm-slim; plus ghcr.io/elementsproject/cln-application (+ Dockerfile.ui)
 architectures:
   - x86_64
   - aarch64
@@ -273,6 +298,7 @@ file_models:
   - /root/.lightning/config
   - /root/.lightning/store.json
   - /root/.lightning/data/app/config.json
+  - /root/.lightning/vpn/wg0.conf # generated from store.json's clearnetVpn on every start
 startos_managed_env_vars:
   - BITCOIN_NETWORK # web UI
   - LIGHTNING_DATA_DIR # web UI
@@ -292,26 +318,31 @@ interfaces:
   ui: { type: ui, port: 4500 }
   rpc: { type: api, port: 8080 }
   peer: { type: p2p, port: 9735 }
-  grpc: { type: api, port: 2106 } # TLS passthrough, not terminated
+  grpc: { type: api, port: 2106 } # raw TCP forward; the plugin's own mutual TLS
   clnrest: { type: api, port: 3010 } # when enabled; URL carries the rune
   websocket: { type: api, port: 7272 } # when the Clams websocket is enabled
 actions:
   - config
   - plugins
   - experimental
-  - createrune
+  - createrune # only-running; read-only, custom restrictions, or unrestricted
   - revoke-runes
   - display-seed # hidden with no wallet; disabled on a pre-BIP-39 wallet
   - rescan-blockchain
   - reset-password
   - delete-gossip-store # only-stopped
   - node-info
+  - pay-invoice # only-running; a companion service may raise it as a task
+  - receive-payment # only-running
+  - clearnet-vpn # hidden; raised as a task by a companion package
 tasks:
   - { action: rescan-blockchain, severity: important } # raised after a restore
+  - { action: clearnet-vpn, severity: important } # only when a companion package raises it
 health_checks:
   - lightningd # displayed "RPC Interface"
   - cln-application # displayed "Web Interface"
   - check-synced # displayed "Synced"
   - custom-external-host # only while Tor Only conflicts with a custom host
+  - vpn-tunnel # displayed "Clearnet VPN"; only while a tunnel is configured; last-handshake age
   - restored # only after an emergency recovery
 ```

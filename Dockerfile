@@ -58,14 +58,13 @@ RUN set -eu; \
     tar -xf "$TARBALL" -C /dist/usr/local --strip-components=2
 
 # bitcoin-cli, which CLN's own plugin-bcli and our check-synced health check
-# both exec. The upstream lightningd image bundled it (v27.1.0); a slim base
-# does not, and a missing one kills lightningd at startup with
-# "The Bitcoin backend died". Checksums are from bitcoincore.org's SHA256SUMS.
+# both exec; without it lightningd dies at startup with "The Bitcoin backend
+# died". Checksums are from bitcoincore.org's SHA256SUMS.
 FROM base AS bitcoin-cli
 ARG TARGETARCH
-ARG BITCOIN_VERSION=27.1
-ARG BITCOIN_SHA256_AMD64=c9840607d230d65f6938b81deaec0b98fe9cb14c3a41a5b13b2c05d044a48422
-ARG BITCOIN_SHA256_ARM64=bb878df4f8ff8fb8acfb94207c50f959c462c39e652f507c2a2db20acc6a1eee
+ARG BITCOIN_VERSION=31.1
+ARG BITCOIN_SHA256_AMD64=b80d9c3e04da78fb6f0569685673418cf686fadba9042d926d13fb87ff503f9e
+ARG BITCOIN_SHA256_ARM64=dcf1873f2208ba4f962f3398d47e154c39c0084be8f4553e05c940d0ace3d004
 RUN apt-get update -qq && \
     apt-get install -qq -y --no-install-recommends ca-certificates && \
     rm -rf /var/lib/apt/lists/*
@@ -92,7 +91,7 @@ FROM debian:bookworm-slim AS final
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     ca-certificates libev-dev libcurl4-gnutls-dev libsqlite3-dev libunwind-dev \
-    libpq5 libsodium23 && \
+    libpq5 libsodium23 wireguard-tools iptables iproute2 procps && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=bitcoin-cli /usr/bin/bitcoin-cli /usr/bin/bitcoin-cli
