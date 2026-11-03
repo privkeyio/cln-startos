@@ -47,8 +47,13 @@ export const watchHosts = sdk.setupOnInit(async (effects, _) => {
     })
     .const()
 
-  const customExternalHosts =
-    (await storeJson.read((s) => s.customExternalHosts).const(effects)) ?? []
+  const storedHosts = await storeJson
+    .read((s) => ({
+      custom: s.customExternalHosts,
+      vpn: s.clearnetVpn?.announce ?? null,
+      tunneled: !!s.clearnetVpn,
+    }))
+    .const(effects)
 
   // `always-use-proxy` disables lightningd's DNS lookups, and an announce-addr
   // it cannot resolve is a fatal parse error, not a warning — writing the host
@@ -57,14 +62,22 @@ export const watchHosts = sdk.setupOnInit(async (effects, _) => {
   const torOnly = await clnConfig
     .read((c) => c['tor-only'] === true)
     .const(effects)
-  const externalHosts = torOnly ? [] : customExternalHosts
+  const externalHosts = torOnly
+    ? []
+    : [
+        ...(storedHosts?.custom ?? []),
+        ...(storedHosts?.vpn ? [storedHosts.vpn] : []),
+      ]
 
   // A tunnel endpoint stands in for this server's own address, so it replaces
   // the detected public IPs rather than joining them — announcing both hands
-  // peers the home IP the tunnel exists to hide.
+  // peers the home IP the tunnel exists to hide. A tunnel without an endpoint
+  // to announce still hides the home IP, leaving only the onions.
   const announceAddr = [
     ...peerAddresses.onions,
-    ...(externalHosts.length ? externalHosts : peerAddresses.ips),
+    ...(externalHosts.length || storedHosts?.tunneled
+      ? externalHosts
+      : peerAddresses.ips),
   ]
 
   // bitcoind's RPC over the bridge; absent until it resolves. Writing undefined

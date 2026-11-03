@@ -1,20 +1,32 @@
 import { FileHelper } from '@start9labs/start-sdk'
 import { manifest as bitcoinManifest } from 'bitcoin-core-startos/startos/manifest'
-import { readFile, writeFile } from 'fs/promises'
+import { createHash } from 'node:crypto'
+import { mkdir, readFile, rm, writeFile } from 'fs/promises'
+import { literal } from './actions/payments'
 import { clnConfig } from './fileModels/config'
 import { storeJson } from './fileModels/store.json'
+import { vpnConfFile } from './fileModels/vpn.conf'
 import { i18n } from './i18n'
 import { sdk } from './sdk'
 import {
   bitcoinDataDir,
   bitcoindRpcBridge,
   clnrestPort,
+  errorMessage,
   grpcPort,
   mainMounts,
   rootDir,
   uiPort,
   wsPort,
 } from './utils'
+import {
+  handshakeStaleMs,
+  parseWireguardConfig,
+  renderWgQuick,
+  vpnDownScript,
+  vpnIface,
+  vpnUpScript,
+} from './vpn'
 
 export const main = sdk.setupMain(async ({ effects }) => {
   /**
@@ -37,6 +49,20 @@ export const main = sdk.setupMain(async ({ effects }) => {
   }
 
   const lightningdArgs: string[] = ['--database-upgrade=true']
+
+  const vpn =
+    store.clearnetVpn && parseWireguardConfig(store.clearnetVpn.config)
+  if (vpn && 'error' in vpn) {
+    throw new Error(`invalid clearnet VPN configuration: ${vpn.error}`)
+  }
+  if (vpn) {
+    await mkdir(sdk.volumes.main.subpath('./vpn'), { recursive: true })
+    await vpnConfFile.write(effects, renderWgQuick(vpn.config))
+  } else {
+    await rm(sdk.volumes.main.subpath(`./vpn/${vpnIface}.conf`), {
+      force: true,
+    })
+  }
 
   if (store.rescan) {
     lightningdArgs.push(`--rescan=${store.rescan}`)
@@ -74,6 +100,23 @@ export const main = sdk.setupMain(async ({ effects }) => {
     'lightning-sub',
   )
 
+  const lightningGetinfo = async () => {
+    for (let attempt = 1; ; attempt++) {
+      const res = await lightningSub.exec([
+        'lightning-cli',
+        `--lightning-dir=${rootDir}`,
+        'getinfo',
+      ])
+      if (
+        (res.exitCode === 0 && res.stdout.length > 0) ||
+        res.timedOutAfter !== null ||
+        attempt === 3
+      )
+        return res
+      await new Promise((resolve) => setTimeout(resolve, 1_000))
+    }
+  }
+
   // Restart only when bitcoind writes a replacement cookie — an absent cookie
   // means bitcoind is down, and stopping lightningd then hangs its shutdown.
   await FileHelper.string(`${await lightningSub.rootfs}/mnt/bitcoin/.cookie`)
@@ -83,7 +126,21 @@ export const main = sdk.setupMain(async ({ effects }) => {
     )
     .const(effects)
 
+  let vpnHealthConfig = store.clearnetVpn?.config ?? null
+  let vpnNoHandshakeSince = Date.now()
+  const vpnConfigHash = createHash('sha256')
+    .update(vpnHealthConfig ?? '')
+    .digest('hex')
+
   const baseDaemons = sdk.Daemons.of(effects)
+    .addOneshot('vpn', {
+      subcontainer: lightningSub,
+      exec: {
+        command: ['sh', '-c', vpn ? vpnUpScript : vpnDownScript],
+        env: { STARTOS_VPN_CONFIG_HASH: vpnConfigHash },
+      },
+      requires: [],
+    })
     .addDaemon('lightningd', {
       subcontainer: lightningSub,
       exec: {
@@ -97,11 +154,7 @@ export const main = sdk.setupMain(async ({ effects }) => {
       ready: {
         display: i18n('RPC Interface'),
         fn: async () => {
-          const res = await lightningSub.exec([
-            'lightning-cli',
-            `--lightning-dir=${rootDir}`,
-            'getinfo',
-          ])
+          const res = await lightningGetinfo()
           if (res.exitCode === 0) {
             return {
               message: i18n('The RPC interface is ready'),
@@ -110,11 +163,11 @@ export const main = sdk.setupMain(async ({ effects }) => {
           }
           return {
             message: i18n('The RPC interface is not ready'),
-            result: 'loading',
+            result: 'starting',
           }
         },
       },
-      requires: [],
+      requires: ['vpn'],
     })
     .addOneshot('commando-config', {
       subcontainer: lightningSub,
@@ -212,11 +265,7 @@ export const main = sdk.setupMain(async ({ effects }) => {
       ready: {
         display: i18n('Synced'),
         fn: async () => {
-          const getinfoRes = await lightningSub.exec([
-            'lightning-cli',
-            `--lightning-dir=${rootDir}`,
-            'getinfo',
-          ])
+          const getinfoRes = await lightningGetinfo()
 
           // Check the exit code before parsing: when lightningd's RPC is not
           // answering, lightning-cli exits non-zero with empty stdout, and
@@ -294,7 +343,7 @@ export const main = sdk.setupMain(async ({ effects }) => {
     })
 
   // Restart on store changes that reconfigure the daemon chain (custom
-  // external hosts) or on a NEW rescan/restore request
+  // external hosts, the clearnet VPN) or on a NEW rescan/restore request
   // — setting a flag is what restarts a running service so main can consume
   // it. A rescan/restore transition back to undefined is the consume-flags
   // oneshot clearing an already-consumed request, treated as equal so the
@@ -306,6 +355,8 @@ export const main = sdk.setupMain(async ({ effects }) => {
       (prev, next) =>
         JSON.stringify(prev?.customExternalHosts) ===
           JSON.stringify(next?.customExternalHosts) &&
+        JSON.stringify(prev?.clearnetVpn) ===
+          JSON.stringify(next?.clearnetVpn) &&
         (next?.rescan === undefined || prev?.rescan === next?.rescan) &&
         (next?.restore === undefined || prev?.restore === next?.restore),
     )
@@ -391,14 +442,87 @@ export const main = sdk.setupMain(async ({ effects }) => {
           }
         : null,
     )
+    .addHealthCheck('vpn-tunnel', () =>
+      vpn
+        ? {
+            ready: {
+              display: i18n('Clearnet VPN'),
+              trigger: sdk.trigger.statusTrigger(30_000, {
+                starting: 5_000,
+                failure: 30_000,
+              }),
+              fn: async () => {
+                const currentConfig =
+                  (await storeJson
+                    .read((s) => s.clearnetVpn?.config ?? null)
+                    .once()) ?? null
+                if (currentConfig !== vpnHealthConfig) {
+                  vpnHealthConfig = currentConfig
+                  vpnNoHandshakeSince = Date.now()
+                }
+                const noHandshake = () => {
+                  const ageMs = Date.now() - vpnNoHandshakeSince
+                  return ageMs > handshakeStaleMs
+                    ? {
+                        result: 'failure' as const,
+                        message: i18n(
+                          'No WireGuard handshake for ${minutes} minutes. Clearnet traffic is held until the tunnel returns, not sent over your ISP connection.',
+                          { minutes: String(Math.floor(ageMs / 60_000)) },
+                        ),
+                      }
+                    : {
+                        result: 'starting' as const,
+                        message: i18n(
+                          'Waiting for the first WireGuard handshake.',
+                        ),
+                      }
+                }
+                let res
+                try {
+                  res = await lightningSub.exec(
+                    ['wg', 'show', vpnIface, 'latest-handshakes'],
+                    { timeout: 10_000 },
+                  )
+                } catch {
+                  return noHandshake()
+                }
+                if (res.exitCode !== 0) return noHandshake()
+                const epoch = Number(
+                  String(res.stdout).trim().split(/\s+/)[1] ?? 0,
+                )
+                if (!epoch) return noHandshake()
+                const ageMs = Date.now() - epoch * 1000
+                if (ageMs > handshakeStaleMs) {
+                  return {
+                    result: 'failure',
+                    message: i18n(
+                      'No WireGuard handshake for ${minutes} minutes. Clearnet traffic is held until the tunnel returns, not sent over your ISP connection.',
+                      { minutes: String(Math.floor(ageMs / 60_000)) },
+                    ),
+                  }
+                }
+                return {
+                  result: 'success',
+                  message: i18n('Tunnel up; last handshake ${seconds}s ago.', {
+                    seconds: String(Math.floor(ageMs / 1000)),
+                  }),
+                }
+              },
+            },
+            requires: ['vpn'],
+          }
+        : null,
+    )
     .addHealthCheck('custom-external-host', () =>
       conf?.['tor-only'] === true && store.customExternalHosts.length
         ? {
             ready: {
               display: i18n('Custom External Host'),
-              // Nothing here initializes, so the default grace period would
-              // only show this as "starting" for its first 10 seconds.
+              // The result only changes when main restarts, so check once.
               gracePeriod: 0,
+              trigger: async function* () {
+                yield
+              },
               fn: async () => ({
                 result: 'failure' as const,
                 message: i18n(

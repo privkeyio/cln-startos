@@ -53,7 +53,6 @@ Notes de version de Core Lightning : https://github.com/ElementsProject/lightnin
                   enabled: 'disabled' | 'enabled'
                 }
                 'shutdown-wrong-funding': boolean
-                splicing: boolean
               }
               plugins: {
                 clboss:
@@ -90,12 +89,11 @@ Notes de version de Core Lightning : https://github.com/ElementsProject/lightnin
         if (experimental?.['shutdown-wrong-funding']) {
           configRaw['experimental-shutdown-wrong-funding'] = true
         }
-        if (experimental?.splicing) {
-          configRaw['experimental-splicing'] = true
-        }
         if (clboss?.enabled === 'enabled') {
           configRaw['clboss-min-onchain'] = clboss['min-onchain'] || undefined
-          configRaw['clboss-auto-close'] = clboss['auto-close'] || undefined
+          configRaw['clboss-auto-close'] = clboss['auto-close']
+            ? 'true'
+            : undefined
           configRaw['clboss-zerobasefee'] =
             clboss.zerobasefee === 'default' ? undefined : clboss.zerobasefee
           configRaw['clboss-min-channel'] = clboss['min-channel'] || undefined

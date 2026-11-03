@@ -8,11 +8,12 @@ For each independent upstream source below: a link to its canonical repo, one co
 
 ### lightningd
 
-- Upstream: [ElementsProject/lightning](https://github.com/ElementsProject/lightning).
-- **Take lightningd from the release tarballs, not the `elementsproject/lightningd` Docker image.** For v26.06.7 upstream published images built from the wrong tree that omitted the release's security fixes while still reporting the new version on startup. The tarballs are signed; the images are not.
+- Upstream: [privkeyio/lightning](https://github.com/privkeyio/lightning), the BLAKE2b fork of [ElementsProject/lightning](https://github.com/ElementsProject/lightning). Its `vX.Y.Z-blake2b.N` releases follow upstream's, so an upstream release reaches this package once the fork has released it.
+- **Take lightningd from the release tarballs, not the `elementsproject/lightningd` Docker image.** The tarballs are covered by a GPG-signed checksum manifest; the images carry no signature or provenance, so a tag or digest pin only fixes whichever artifact it captured.
 - Latest release tag:
   ```sh
   gh release view -R ElementsProject/lightning --json tagName -q .tagName
+  gh release view -R privkeyio/lightning --json tagName -q .tagName
   ```
 - Get the checksums and verify the manifest signature before trusting either:
   ```sh
@@ -20,12 +21,12 @@ For each independent upstream source below: a link to its canonical repo, one co
   gpg --verify SHA256SUMS-<tag>.asc SHA256SUMS-<tag>
   ```
   Maintainer fingerprints are listed on the release page.
-- Current pin: `CLN_VERSION` plus the per-arch `CLN_SHA256_*` args in the `lightningd-dist` stage of `Dockerfile`.
+- Current pin: `CLN_REPO`, `CLN_VERSION` and the per-arch `CLN_SHA256_*` args in the `lightningd-dist` stage of `Dockerfile`.
 
 ### bitcoin-cli
 
 - Upstream: [Bitcoin Core](https://bitcoincore.org/bin/). Only `bitcoin-cli` is taken; nothing else from the release is used.
-- **It is a hard runtime dependency, not a convenience.** CLN's own `plugin-bcli` execs it, and so does the `check-synced` health check. Without it `lightningd` exits at startup with `The Bitcoin backend died` and the service crash-loops. The upstream lightningd image bundled it, so this only became ours to supply once we stopped using that image.
+- **It is a hard runtime dependency, not a convenience.** CLN's own `plugin-bcli` execs it, and so does the `check-synced` health check. Without it `lightningd` exits at startup with `The Bitcoin backend died` and the service crash-loops.
 - It talks JSON-RPC to whatever `bitcoind` the user runs, so it does not need to track that package's version. **A new Bitcoin Core release is not a bump on its own: refresh this pin only when `CLN_VERSION` moves.**
 - Checksums:
   ```sh
@@ -45,7 +46,7 @@ For each independent upstream source below: a link to its canonical repo, one co
   gh api /users/elementsproject/packages/container/cln-application/versions \
     --jq '.[].metadata.container.tags[]' | sort -u | head -20
   ```
-- Current pin: `images.ui.source.dockerTag` in `startos/manifest/index.ts` (`ghcr.io/elementsproject/cln-application:<version>`).
+- Current pin: the `IMAGE` build arg of `images.ui` in `startos/manifest/index.ts` (`ghcr.io/elementsproject/cln-application:<version>`), layered by `Dockerfile.ui`.
 
 ### CLBOSS
 
@@ -86,6 +87,7 @@ For each independent upstream source below: a link to its canonical repo, one co
 ### lightningd
 
 - Update `CLN_VERSION` and both `CLN_SHA256_*` args in the `lightningd-dist` stage of `Dockerfile`, taking the hashes from the GPG-verified `SHA256SUMS` for the `Ubuntu-22.04` tarballs. That build's glibc runs on the bookworm final stage, which is what every other binary in the image is compiled against — check that still holds if you move to a different tarball.
+- The final stage deselects the emSign C1 and C3 roots from Debian's CA store, and the build fails if either file has gone. Once bookworm's `ca-certificates` drops them itself, remove that `RUN` step.
 
 ### bitcoin-cli
 
@@ -93,7 +95,7 @@ For each independent upstream source below: a link to its canonical repo, one co
 
 ### CLN Application (Web UI)
 
-- Bump the `dockerTag` for the `ui` image in `startos/manifest/index.ts` to `ghcr.io/elementsproject/cln-application:<new version>`.
+- Bump the `IMAGE` build arg for the `ui` image in `startos/manifest/index.ts` to `ghcr.io/elementsproject/cln-application:<new version>`. Once the new image's `NODE_VERSION` is 22.23.4 or later, drop the `node` layer from `Dockerfile.ui`. Keep the file itself, since it also rewrites the explorer links, and check that the rewrite still finds `blockstream.info` in the new image's bundle.
 
 ### CLBOSS
 

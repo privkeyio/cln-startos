@@ -1,5 +1,4 @@
 import { FileHelper, T, z } from '@start9labs/start-sdk'
-import * as INI from 'ini'
 import { i18n } from '../i18n'
 import { sdk } from '../sdk'
 import {
@@ -30,6 +29,7 @@ const iniNumber = z
     z.string().transform(Number),
     z.number(),
   ])
+  .pipe(z.number())
   .optional()
   .catch(undefined)
 
@@ -69,11 +69,12 @@ export const clbossZerobasefees = [
   'disallow',
 ] as const
 
-export const shape = z.object({
+export const shape = z.looseObject({
   // Enforced by StartOS
   network: z.literal('bitcoin').catch('bitcoin'),
   'bitcoin-rpcconnect': iniString,
   'bitcoin-rpcport': iniNumber,
+  'bitcoin-retry-timeout': iniNumber,
   'bitcoin-datadir': z.literal(bitcoinDataDir).catch(bitcoinDataDir),
   'bind-addr': z
     .union([z.array(z.string()), z.string().transform((s) => [s])])
@@ -81,7 +82,7 @@ export const shape = z.object({
   'bitcoin-rpcuser': z.undefined().catch(undefined),
   'bitcoin-rpcpassword': z.undefined().catch(undefined),
   'grpc-port': z.literal(grpcPort).catch(grpcPort),
-  'grpc-host': z.literal('0.0.0.0').catch('0.0.0.0'),
+  'grpc-host': z.literal('[::]').catch('[::]'),
 
   // Dynamic (set at runtime)
   'announce-addr': iniStringArray,
@@ -120,12 +121,12 @@ export const shape = z.object({
 
   // Experimental
   'experimental-dual-fund': iniBoolean,
-  'experimental-splicing': iniBoolean,
   'experimental-shutdown-wrong-funding': iniBoolean,
 
   // CLBOSS (plugin options, read from config when plugin is loaded at startup)
   'clboss-min-onchain': iniNumber,
-  'clboss-auto-close': iniBoolean,
+  // CLBOSS registers this as a bool option, so a bare key (no =value) makes lightningd refuse to start
+  'clboss-auto-close': iniStringBoolean,
   'clboss-zerobasefee': iniEnum([...clbossZerobasefees]),
   'clboss-min-channel': iniNumber,
   'clboss-max-channel': iniNumber,
@@ -146,6 +147,8 @@ export const dropRemovedPlugins = (plugins: string[]) => ({
   'clboss-zerobasefee': undefined,
   'clboss-min-channel': undefined,
   'clboss-max-channel': undefined,
+  // The Splicing toggle is gone, and lightningd drops the option in v27.04.
+  'experimental-splicing': undefined,
 })
 
 const { InputSpec, Value } = sdk
@@ -159,7 +162,7 @@ export const fullConfigSpec = InputSpec.of({
     default: null,
     required: false,
     description: i18n(
-      'A custom, human-readable name for your node.  This is publicly visible to the Lightning Network.  <b>Default: Unique id of pattern: start9-[random alphanumerics]</b>',
+      'The name other Lightning nodes and network explorers show for your node. Leave it empty and Core Lightning uses a name derived from your node ID.',
     ),
     patterns: [
       {
@@ -169,7 +172,6 @@ export const fullConfigSpec = InputSpec.of({
         ),
       },
     ],
-    footnote: `${i18n('Default')}: start9-[random alphanumerics]`,
   }),
   color: Value.text({
     name: i18n('Color'),
@@ -213,9 +215,9 @@ export const fullConfigSpec = InputSpec.of({
     default: null,
     required: false,
     description: i18n(
-      'A public address at which your node can be reached through an external tunnel or VPN endpoint, such as Tunnelsats. Enter a domain, optionally followed by a port (e.g. example.com:22222); the port defaults to 9735. This is announced in place of any public IP address StartOS detects, so peers are not handed the home IP the tunnel exists to hide. Your Tor address is still announced.',
+      'A public address at which your node can be reached through an external tunnel or VPN endpoint. Enter a domain, optionally followed by a port (e.g. example.com:22222); the port defaults to 9735. This is announced in place of any public IP address StartOS detects, so peers are not handed the home IP the tunnel exists to hide. Your Tor address is still announced.',
     ),
-    placeholder: 'example.tunnelsatsv2.com:22222',
+    placeholder: 'example.com:22222',
     patterns: [
       {
         regex: '^([a-zA-Z0-9-]+\\.)+[a-zA-Z]{2,}(:[0-9]{1,5})?$',
@@ -282,6 +284,20 @@ export const fullConfigSpec = InputSpec.of({
     footnote: `${i18n('Default')}: 3 blocks`,
   }),
 
+  // Bitcoin
+  'bitcoin-retry-timeout': Value.number({
+    name: i18n('Bitcoin Retry Timeout'),
+    description: i18n(
+      'How long Core Lightning keeps retrying a request to Bitcoin before it shuts down. Raise it if Core Lightning stops with "The Bitcoin backend died" while Bitcoin is busy, for example during a reindex.',
+    ),
+    default: null,
+    required: false,
+    min: 1,
+    integer: true,
+    units: 'seconds',
+    footnote: `${i18n('Default')}: 60 seconds`,
+  }),
+
   // Payments
   'xpay-handle-pay': Value.triState({
     name: i18n('Xpay'),
@@ -302,29 +318,39 @@ export const fullConfigSpec = InputSpec.of({
   }),
 })
 
-// CLN uses bare flags for boolean options (e.g. `experimental-dual-fund` not
-// `experimental-dual-fund=true`). The `ini` package always writes `key=value`,
-// so we use a custom serializer that extracts boolean true values as bare flags.
+// lightningd reads each value verbatim to the end of the line: no quoting, escaping or inline comments.
 function clnIniStringify(data: Record<string, unknown>): string {
+  const lines: string[] = []
   const bareFlags: string[] = []
-  const iniData: Record<string, unknown> = {}
 
   for (const [key, val] of Object.entries(data)) {
     if (val === undefined || val === false) continue
     if (val === true) {
-      bareFlags.push(key)
-    } else if (Array.isArray(val)) {
-      const filtered = val.filter((v) => v !== undefined)
-      if (filtered.length > 0) iniData[key] = filtered
+      bareFlags.push(`${key}\n`)
     } else {
-      iniData[key] = val
+      for (const v of [val].flat()) {
+        if (v !== undefined) lines.push(`${key}=${String(v)}\n`)
+      }
     }
   }
 
-  let result = INI.stringify(iniData, { bracketedArray: false })
+  return [...lines, ...bareFlags].join('')
+}
 
-  for (const flag of bareFlags) {
-    result += `${flag}\n`
+function clnIniParse(text: string): Record<string, string | string[] | true> {
+  const result: Record<string, string | string[] | true> = {}
+
+  for (const line of text.split('\n').map((l) => l.trim())) {
+    if (!line || line.startsWith('#')) continue
+    const eq = line.indexOf('=')
+    if (eq < 0) {
+      result[line] = true
+      continue
+    }
+    const key = line.slice(0, eq).trim()
+    const val = line.slice(eq + 1).trim()
+    const prev = result[key]
+    result[key] = prev === undefined || prev === true ? val : [prev, val].flat()
   }
 
   return result
@@ -342,6 +368,7 @@ export function fileToForm(
     'fee-per-satoshi': feePerSatoshi,
     'min-capacity-sat': minCapacitySat,
     'funding-confirms': fundingConfirms,
+    'bitcoin-retry-timeout': bitcoinRetryTimeout,
     'xpay-handle-pay': xpayHandlePay,
     'clnrest-host': clnrestHost,
     'clnrest-port': clnrestPort,
@@ -357,6 +384,7 @@ export function fileToForm(
     'fee-rate': feePerSatoshi,
     'min-capacity': minCapacitySat,
     'funding-confirms': fundingConfirms,
+    'bitcoin-retry-timeout': bitcoinRetryTimeout,
     'xpay-handle-pay':
       xpayHandlePay === undefined ? null : xpayHandlePay === 'true',
     clnrest: !!clnrestHost && !!clnrestPort,
@@ -376,6 +404,7 @@ function formToFile(
     'fee-rate': feeRate,
     'min-capacity': minCapacity,
     'funding-confirms': fundingConfirms,
+    'bitcoin-retry-timeout': bitcoinRetryTimeout,
     'xpay-handle-pay': xpayHandlePay,
     clnrest,
   } = input
@@ -402,7 +431,7 @@ function formToFile(
     'bitcoin-rpcuser': undefined,
     'bitcoin-rpcpassword': undefined,
     'grpc-port': grpcPort,
-    'grpc-host': '0.0.0.0',
+    'grpc-host': '[::]',
 
     // Node identity
     alias: alias || undefined,
@@ -423,6 +452,9 @@ function formToFile(
     'min-capacity-sat': minCapacity ?? undefined,
     'funding-confirms': fundingConfirms ?? undefined,
 
+    // Bitcoin
+    'bitcoin-retry-timeout': bitcoinRetryTimeout ?? undefined,
+
     // Payments
     'xpay-handle-pay':
       xpayHandlePay == null ? undefined : xpayHandlePay ? 'true' : 'false',
@@ -442,7 +474,7 @@ export const clnConfig = FileHelper.raw<FormData>(
   (formData) =>
     clnIniStringify(formToFile(formData) as Record<string, unknown>),
   (iniString) => {
-    const base = shape.parse(INI.parse(iniString, { bracketedArray: false }))
+    const base = shape.parse(clnIniParse(iniString))
     return fileToForm(base)
   },
   (data) => fullConfigSpec.partialValidator.parse(data),
