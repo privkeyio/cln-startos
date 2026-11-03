@@ -29,7 +29,11 @@ async function decodeInvoice(
     mainMounts,
     'decode-pay-invoice',
     async (subc) => {
-      const decodeRes = await subc.exec([...cli, 'decode', invoice])
+      const decodeRes = await subc.exec([
+        ...cli,
+        'decode',
+        JSON.stringify(invoice),
+      ])
       const decoded =
         decodeRes.exitCode === 0 ? cliJson<Decoded>(decodeRes.stdout) : null
       if (!decoded?.valid || decoded.type !== 'bolt11 invoice') {
@@ -201,7 +205,7 @@ export const payInvoice = sdk.Action.withInput(
             ...cli,
             '-k',
             'pay',
-            `bolt11=${invoice}`,
+            `bolt11=${JSON.stringify(invoice)}`,
             `maxfeepercent=${input['max-fee-percent']}`,
             'retry_for=60',
             ...(entered === null ? [] : [`amount_msat=${entered}sat`]),

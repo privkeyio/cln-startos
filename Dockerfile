@@ -94,6 +94,23 @@ RUN apt-get update && \
     libpq5 libsodium23 wireguard-tools iptables iproute2 procps && \
     rm -rf /var/lib/apt/lists/*
 
+# Mozilla removed the compromised eMudhra roots in NSS 3.131.1, which bookworm's
+# ca-certificates has not picked up. emSign ECC Root CA - G3 is already absent.
+RUN set -eu; \
+    for c in emSign_Root_CA_-_C1 emSign_ECC_Root_CA_-_C3; do \
+      f=/usr/share/ca-certificates/mozilla/$c.crt; \
+      [ -f "$f" ] || { echo "$c not found: has ca-certificates changed?" >&2; exit 1; }; \
+      sed -i "s|^mozilla/$c\.crt$|!mozilla/$c.crt|" /etc/ca-certificates.conf; \
+      cp "$f" /tmp/$c.crt; \
+    done; \
+    update-ca-certificates --fresh >/dev/null; \
+    for c in emSign_Root_CA_-_C1 emSign_ECC_Root_CA_-_C3; do \
+      ! tr -d '\n' < /etc/ssl/certs/ca-certificates.crt \
+        | grep -qF "$(grep -v -- ----- /tmp/$c.crt | tr -d '\n')" \
+        || { echo "$c is still trusted" >&2; exit 1; }; \
+      rm /tmp/$c.crt; \
+    done
+
 COPY --from=bitcoin-cli /usr/bin/bitcoin-cli /usr/bin/bitcoin-cli
 COPY --from=lightningd-dist /dist/usr/local /usr/local
 COPY --from=sling /usr/local/bin/sling /usr/local/libexec/c-lightning/plugins/

@@ -87,6 +87,7 @@ For each independent upstream source below: a link to its canonical repo, one co
 ### lightningd
 
 - Update `CLN_VERSION` and both `CLN_SHA256_*` args in the `lightningd-dist` stage of `Dockerfile`, taking the hashes from the GPG-verified `SHA256SUMS` for the `Ubuntu-22.04` tarballs. That build's glibc runs on the bookworm final stage, which is what every other binary in the image is compiled against — check that still holds if you move to a different tarball.
+- The final stage deselects the emSign C1 and C3 roots from Debian's CA store, and the build fails if either file has gone. Once bookworm's `ca-certificates` drops them itself, remove that `RUN` step.
 
 ### bitcoin-cli
 

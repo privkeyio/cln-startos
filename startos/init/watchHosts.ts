@@ -51,6 +51,7 @@ export const watchHosts = sdk.setupOnInit(async (effects, _) => {
     .read((s) => ({
       custom: s.customExternalHosts,
       vpn: s.clearnetVpn?.announce ?? null,
+      tunneled: !!s.clearnetVpn,
     }))
     .const(effects)
 
@@ -70,10 +71,13 @@ export const watchHosts = sdk.setupOnInit(async (effects, _) => {
 
   // A tunnel endpoint stands in for this server's own address, so it replaces
   // the detected public IPs rather than joining them — announcing both hands
-  // peers the home IP the tunnel exists to hide.
+  // peers the home IP the tunnel exists to hide. A tunnel without an endpoint
+  // to announce still hides the home IP, leaving only the onions.
   const announceAddr = [
     ...peerAddresses.onions,
-    ...(externalHosts.length ? externalHosts : peerAddresses.ips),
+    ...(externalHosts.length || storedHosts?.tunneled
+      ? externalHosts
+      : peerAddresses.ips),
   ]
 
   // bitcoind's RPC over the bridge; absent until it resolves. Writing undefined
