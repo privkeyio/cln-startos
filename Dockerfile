@@ -94,8 +94,10 @@ RUN apt-get update && \
     libpq5 libsodium23 wireguard-tools iptables iproute2 procps && \
     rm -rf /var/lib/apt/lists/*
 
-# Mozilla removed the compromised eMudhra roots in NSS 3.131.1, which bookworm's
-# ca-certificates has not picked up. emSign ECC Root CA - G3 is already absent.
+# Mozilla's root store no longer includes emSign Root CA - C1 or emSign ECC Root
+# CA - C3, which it retired at eMudhra's request, but bookworm's ca-certificates
+# still ships them. emSign ECC Root CA - G3, which Mozilla removed after a key
+# compromise, is already absent.
 RUN set -eu; \
     for c in emSign_Root_CA_-_C1 emSign_ECC_Root_CA_-_C3; do \
       f=/usr/share/ca-certificates/mozilla/$c.crt; \
