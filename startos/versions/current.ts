@@ -33,8 +33,12 @@ export const current = VersionInfo.of({
 - Channels funded before the BLAKE2b activation are treated as private in gossip.
 - Transactions and PSBTs whose outputs exceed the maximum money supply are refused.
 - xpay holds payments until its startup requests have answered, and renepay handles failed payment routes more carefully.
+- The web interface moves to CLN Application 26.09, a security release from its developers, and runs on Node.js with the October 2026 security fixes. Its transaction links still go to an explorer that follows BLAKE2b.
+- Invoice runes created from the Connect Wallet screen now work with wallets. An invoice rune created there by an earlier version is removed during this update, so create a new one from the same screen.
+- New Pay Invoice and Receive Payment actions.
+- Create Rune asks what the rune may do: read-only, limited to restrictions you enter, or unrestricted.
+- Certificates from the compromised eMudhra certificate authority are no longer trusted.
 - The bundled bitcoin-cli is updated to 32.1.
-- Connect Wallet no longer shows a saved invoice rune. Select Create there to show it again. A wallet set up with an invoice rune from before CLN Application 26.09 needs the new one.
 
 The watchtower and CLBOSS stay removed, since neither can follow BLAKE2b yet.
 
