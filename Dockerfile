@@ -29,17 +29,17 @@ RUN set -eu; \
 
 # lightningd, from the signed release tarballs.
 #
-# This is a fork of Core Lightning v26.06.9 that adds support for the 164-byte
+# This is a fork of Core Lightning v26.06.10 that adds support for the 164-byte
 # BLAKE2b block header. Without it a node cannot parse the activation block and
 # dies on the first one.
 #
-# The hashes come from SHA256SUMS-v26.06.9-blake2b.10 (amd64) and SHA256SUMS-v26.06.9-blake2b.10-arm64, GPG-verified against A47D99B6DB0D715D40C59A2023AE8A8EA7E24E38.
+# The hashes come from SHA256SUMS-v26.06.10-blake2b.1 (amd64) and SHA256SUMS-v26.06.10-blake2b.1-arm64, GPG-verified against A47D99B6DB0D715D40C59A2023AE8A8EA7E24E38.
 FROM base AS lightningd-dist
 ARG TARGETARCH
 ARG CLN_REPO=privkeyio/lightning
-ARG CLN_VERSION=v26.06.9-blake2b.10
-ARG CLN_SHA256_AMD64=e8cbffee52e7f4ea8404c3ae3b83c07a4099ffcf7ad698110bbd84a331959b7b
-ARG CLN_SHA256_ARM64=161bff9f776ec8db0019211ede6dcb6684ad2387787ce06133b50fae32aac31a
+ARG CLN_VERSION=v26.06.10-blake2b.1
+ARG CLN_SHA256_AMD64=b3e7af0e376ae1f6b22f16c416a86474f6ab3c4d44c5aa6ef1a4a848a4cd9c72
+ARG CLN_SHA256_ARM64=7a54f4821acdf773c6f90ccb6fafdd2f5fda9e557f272311fc5b7b8862842ad6
 RUN apt-get update -qq && \
     apt-get install -qq -y --no-install-recommends ca-certificates xz-utils && \
     rm -rf /var/lib/apt/lists/*
@@ -62,9 +62,9 @@ RUN set -eu; \
 # died". Checksums are from bitcoincore.org's SHA256SUMS.
 FROM base AS bitcoin-cli
 ARG TARGETARCH
-ARG BITCOIN_VERSION=31.1
-ARG BITCOIN_SHA256_AMD64=b80d9c3e04da78fb6f0569685673418cf686fadba9042d926d13fb87ff503f9e
-ARG BITCOIN_SHA256_ARM64=dcf1873f2208ba4f962f3398d47e154c39c0084be8f4553e05c940d0ace3d004
+ARG BITCOIN_VERSION=32.1
+ARG BITCOIN_SHA256_AMD64=61545c17c3120fb7412f896d248b11993af04ec8817aad3649c55b2afb044963
+ARG BITCOIN_SHA256_ARM64=7ed37c7373eb6aa3e3f72842596a1afeba1b223717033cade9842b25773e1922
 RUN apt-get update -qq && \
     apt-get install -qq -y --no-install-recommends ca-certificates && \
     rm -rf /var/lib/apt/lists/*

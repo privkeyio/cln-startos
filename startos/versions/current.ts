@@ -9,8 +9,10 @@ import { commandoEnv } from '../utils'
 const removePlugins = ({ effects }: { effects: T.Effects }) =>
   removeDroppedPlugins(effects)
 
-//An invoice rune made by a web interface before 26.09 does not work with wallets. Only edges from
-//such a version run this, so a rune made by 26.09 is kept.
+//An invoice rune made by a web interface before 26.09 does not work with wallets, and 26.09 will
+//not save a new one while it is set. Every edge from a blake version runs this, because
+//#blake:26.6.9:5 did not remove it on updates from earlier blake versions. A rune made by 26.09
+//stays valid in lightningd, and Connect Wallet finds it again.
 const removePluginsAndOldInvoiceRune = async ({
   effects,
 }: {
@@ -23,22 +25,22 @@ const removePluginsAndOldInvoiceRune = async ({
 }
 
 export const current = VersionInfo.of({
-  version: '#blake:26.6.9:5',
+  version: '#blake:26.6.10:0',
   releaseNotes: {
-    en_US: `Brings in Start9's latest updates to the package. The node is still Core Lightning v26.06.9-blake2b.10.
+    en_US: `Core Lightning v26.06.10-blake2b.1, based on upstream v26.06.10, which fixes security-relevant bugs. We strongly recommend updating.
 
-- The web interface moves to CLN Application 26.09, a security release from its developers, and runs on Node.js with the October 2026 security fixes. Its transaction links still go to an explorer that follows BLAKE2b.
-- Invoice runes created from the Connect Wallet screen now work with wallets. An invoice rune created there by an earlier version is removed during this update, so create a new one from the same screen.
-- New Pay Invoice and Receive Payment actions.
-- Create Rune asks what the rune may do: read-only, limited to restrictions you enter, or unrestricted.
-- Certificates from the compromised eMudhra certificate authority are no longer trusted.
-- The bundled bitcoin-cli is updated to 31.1.
+- All fixes from upstream v26.06.10, including onchaind HTLC resolution, dual-funding and splice fixes, and gossip size limits.
+- Channels funded before the BLAKE2b activation are treated as private in gossip.
+- Transactions and PSBTs whose outputs exceed the maximum money supply are refused.
+- xpay holds payments until its startup requests have answered, and renepay handles failed payment routes more carefully.
+- The bundled bitcoin-cli is updated to 32.1.
+- Connect Wallet no longer shows a saved invoice rune. Select Create there to show it again. A wallet set up with an invoice rune from before CLN Application 26.09 needs the new one.
 
 The watchtower and CLBOSS stay removed, since neither can follow BLAKE2b yet.
 
 ## Notes for operators
 
-- Updating from \`#blake:26.6.9:1\` through \`#blake:26.6.9:4\` does not change the database.
+- Updating from \`#blake:26.6.9:1\` through \`#blake:26.6.9:5\` does not change the database.
 - Updating from a version before \`#blake:26.6.9:1\` upgrades the node's database once, at its first start. That version cannot use the upgraded database, so back up before updating if you may need to go back.
 - If the node stops with "80-byte header", its Bitcoin service is not following BLAKE2b. Point it at one that is.
 - Channels opened with \`v26.06.7-blake2b.1\` to \`.3\` do not use unified signatures. Close them and open new ones.`,
@@ -55,45 +57,11 @@ The watchtower and CLBOSS stay removed, since neither can follow BLAKE2b yet.
       ['^26 && <26.6.8:3']: {
         up: removePluginsAndOldInvoiceRune,
       },
-      ['^26 && >=26.6.8:3']: {
+      ['^26 && >=26.6.8:3 && <26.6.11:0']: {
         up: removePlugins,
       },
-      //Arriving from the first blake flavor, whose web interface used commando.
-      ['#blake:26.6.7:1']: {
-        up: removePluginsAndOldInvoiceRune,
-      },
-      //Arriving from the flavor that shipped CLBOSS and linked to an explorer that has not adopted BLAKE2b.
-      ['#blake:26.6.7:2']: {
-        up: removePluginsAndOldInvoiceRune,
-      },
-      //Arriving from Core Lightning v26.06.7-blake2b.4.
-      ['#blake:26.6.7:3']: {
-        up: removePluginsAndOldInvoiceRune,
-      },
-      //Arriving from Core Lightning v26.06.8-blake2b.5.
-      ['#blake:26.6.8:0']: {
-        up: removePluginsAndOldInvoiceRune,
-      },
-      //Arriving from Core Lightning v26.06.8-blake2b.6.
-      ['#blake:26.6.8:1']: {
-        up: removePluginsAndOldInvoiceRune,
-      },
-      //Arriving from Core Lightning v26.06.9-blake2b.7.
-      ['#blake:26.6.9:0']: {
-        up: removePluginsAndOldInvoiceRune,
-      },
-      //Arriving from the flavor that shipped The Eye of Satoshi.
-      ['#blake:26.6.9:1']: {
-        up: removePluginsAndOldInvoiceRune,
-      },
-      //Arriving from Core Lightning v26.06.9-blake2b.8 without the watchtower.
-      ['#blake:26.6.9:2']: {
-        up: removePluginsAndOldInvoiceRune,
-      },
-      //Arriving from Core Lightning v26.06.9-blake2b.9.
-      ['#blake:26.6.9:3']: {
-        up: removePluginsAndOldInvoiceRune,
-      },
+      //A bare version key is a caret range that also contains this version, so update edges from
+      //blake versions come from up above, not from keys here.
     },
   },
 })

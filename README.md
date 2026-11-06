@@ -11,7 +11,7 @@
 
 [Core Lightning](https://github.com/ElementsProject/lightning) is a Lightning Network node implementation. This package builds it with the Sling plugin built into the image and runs a web UI alongside it. It does not include a watchtower: The Eye of Satoshi's tower cannot read BLAKE2b block headers, so the watchtower returns once it supports BLAKE2b.
 
-This is the `#blake` flavor of the package. It builds Core Lightning v26.06.9 with support for the 164-byte BLAKE2b block header, which the stock build cannot parse: a stock node stops at the activation block. It also signs wallet transactions and new channels with the opt-in `SIGHASH_UNIFIED` digest, so a channel funded past activation from coins received past activation is signed in a way a node that has not upgraded rejects.
+This is the `#blake` flavor of the package. It builds Core Lightning v26.06.10 with support for the 164-byte BLAKE2b block header, which the stock build cannot parse: a stock node stops at the activation block. It also signs wallet transactions and new channels with the opt-in `SIGHASH_UNIFIED` digest, so a channel funded past activation from coins received past activation is signed in a way a node that has not upgraded rejects.
 
 See [BLAKE2b Hard Fork Support](#blake2b-hard-fork-support) for what that changes, including the peers you can connect to and the coins you should fund channels from.
 
@@ -40,7 +40,7 @@ See [BLAKE2b Hard Fork Support](#blake2b-hard-fork-support) for what that change
 
 ## Image and Container Runtime
 
-Two images. The node's is built here: a signed release tarball is unpacked onto a slim Debian base and the Sling plugin is added. The web UI's is upstream's, with two changes made by `Dockerfile.ui`: its `node` binary is replaced from `node:22.23.4-bookworm-slim`, a temporary layer that comes out once upstream ships an image on Node 22.23.4 or later, and its transaction links are rewritten from blockstream.info to mempool.guide, which follows BLAKE2b. lightningd comes from the `v26.06.9-blake2b.10` release tarball of `privkeyio/lightning`, with its checksum pinned in the `lightningd-dist` stage and taken from a GPG-verified manifest. `bitcoin-cli` is pinned and checksummed the same way in the `bitcoin-cli` stage, because `plugin-bcli` and the `check-synced` health check both exec it.
+Two images. The node's is built here: a signed release tarball is unpacked onto a slim Debian base and the Sling plugin is added. The web UI's is upstream's, with two changes made by `Dockerfile.ui`: its `node` binary is replaced from `node:22.23.4-bookworm-slim`, a temporary layer that comes out once upstream ships an image on Node 22.23.4 or later, and its transaction links are rewritten from blockstream.info to mempool.guide, which follows BLAKE2b. lightningd comes from the `v26.06.10-blake2b.1` release tarball of `privkeyio/lightning`, with its checksum pinned in the `lightningd-dist` stage and taken from a GPG-verified manifest. `bitcoin-cli` is pinned and checksummed the same way in the `bitcoin-cli` stage, because `plugin-bcli` and the `check-synced` health check both exec it.
 
 | Property      | Value                                                                                                               |
 | ------------- | ------------------------------------------------------------------------------------------------------------------- |
