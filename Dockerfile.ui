@@ -1,18 +1,27 @@
-ARG IMAGE
-FROM ${IMAGE}
-# Upstream's Node predates the October 2026 security release.
-COPY --from=node:22.23.4-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da /usr/local/bin/node /usr/local/bin/node
-ENV NODE_VERSION=22.23.4
+FROM node:22.23.4-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da AS build
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates python3 \
+    build-essential libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev && \
+    rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+RUN git init && git remote add origin https://github.com/ElementsProject/cln-application.git && \
+    git fetch --depth=1 origin ff2d698b4f64c86d950d6abe61bd6b8a0b52a68c && \
+    git checkout --detach FETCH_HEAD && \
+    test "$(git rev-parse HEAD)" = ff2d698b4f64c86d950d6abe61bd6b8a0b52a68c
+COPY assets/ui-xbt.patch /tmp/ui-xbt.patch
+RUN echo 'c5a7ec42dfcb46c6ee090c4d5523f09dcc193dfce186f073a44487fb50608bce  /tmp/ui-xbt.patch' | sha256sum -c - && \
+    git apply --check /tmp/ui-xbt.patch && git apply /tmp/ui-xbt.patch
+RUN npm ci && ./node_modules/.bin/tsc -p apps/backend/tsconfig.json && node --test apps/backend/test/*.test.mjs && \
+    npm test -w cln-application-frontend -- --runInBand channel-status.test.ts Channels.test.tsx FiatBox.test.tsx && \
+    npm run frontend:build && npm prune --omit=dev
 
-# The web interface links transactions to blockstream.info, which has not
-# adopted BLAKE2b, so a transaction from this node is not there. The URL is baked
-# into the built frontend bundle rather than configurable, so rewrite the host.
-# mempool.guide follows BLAKE2b and uses the same URL shape.
-RUN set -eu; \
-    n=$(grep -rl 'blockstream\.info' /app/apps/frontend/build/ | wc -l); \
-    [ "$n" -gt 0 ] || { echo "no blockstream.info found: has the app changed?" >&2; exit 1; }; \
-    grep -rl 'blockstream\.info' /app/apps/frontend/build/ \
-      | xargs sed -i 's|https://blockstream\.info/|https://mempool.guide/|g'; \
-    ! grep -rq 'blockstream\.info' /app/apps/frontend/build/ \
-      || { echo "rewrite incomplete" >&2; exit 1; }; \
-    echo "rewrote explorer host in $n file(s)"
+FROM node:22.23.4-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da
+WORKDIR /app
+COPY --from=build /app/apps/frontend/build /app/apps/frontend/build
+COPY --from=build /app/apps/frontend/public /app/apps/frontend/public
+COPY --from=build /app/apps/frontend/package.json /app/apps/frontend/package.json
+COPY --from=build /app/apps/backend/dist /app/apps/backend/dist
+COPY --from=build /app/apps/backend/package.json /app/apps/backend/package.json
+COPY --from=build /app/apps/backend/proto /app/apps/backend/proto
+COPY --from=build /app/node_modules /app/node_modules
+COPY --from=build /app/package.json /app/package.json
+CMD ["node", "/app/apps/backend/dist/server.js"]

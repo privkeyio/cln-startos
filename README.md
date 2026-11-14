@@ -20,6 +20,14 @@ See [BLAKE2b Hard Fork Support](#blake2b-hard-fork-support) for what that change
 
 ---
 
+## Package UI extensions
+
+The UI is built from CLN Application 26.09 commit `ff2d698b4f64c86d950d6abe61bd6b8a0b52a68c` plus the hash-checked `assets/ui-xbt.patch`. It adds persistent channel labels in CLN's datastore, splice-in/out controls with an explicit review, pending splice progress, bounded liquidity bars, wrapping channel labels/IDs, and advertised peer addresses. Splice requests use the existing CLN RPCs; unresolved submissions remain visible to avoid accidental repeats.
+
+Fiat display uses a cached public Neoxa BTCB2/USDC ticker and a public USD exchange-rate table from Frankfurter. Only fixed market requests leave the server; balances and payment amounts are converted locally in the browser. USDC is treated as a USD estimate. Invalid or stale prices show unavailable instead of substituting the SHA256 Bitcoin price. The UI accepts XBT BOLT11 invoices only (required feature bit 512); offers are not exposed by this UI patch.
+
+This UI change does not install the swap-controller plugins or change the native engine. The package retains service ID `c-lightning`, its signed engine release and existing wallet volume/migrations.
+
 ## Table of Contents
 
 - [Image and Container Runtime](#image-and-container-runtime)
@@ -285,7 +293,7 @@ Four consequences worth knowing:
 
 ```yaml
 package_id: c-lightning
-image: ./Dockerfile # on debian:bookworm-slim; plus ghcr.io/elementsproject/cln-application (+ Dockerfile.ui)
+image: ./Dockerfile # on debian:bookworm-slim; plus source-built CLN Application (Dockerfile.ui)
 architectures:
   - x86_64
   - aarch64

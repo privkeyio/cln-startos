@@ -1,6 +1,6 @@
 # Updating the upstream version
 
-Core Lightning is built from a custom `Dockerfile` (the `lightning` image) that unpacks upstream's signed release tarball onto a `debian:bookworm-slim` base, plus a sidecar `ui` image pulled by tag. Several upstream components feed into the build, and a bump usually touches more than one.
+Core Lightning is built from a custom `Dockerfile` (the `lightning` image) that unpacks upstream's signed release tarball onto a `debian:bookworm-slim` base, plus a sidecar `ui` image built from pinned CLN Application source. Several upstream components feed into the build, and a bump usually touches more than one.
 
 ## Determining the upstream version
 
@@ -46,7 +46,7 @@ For each independent upstream source below: a link to its canonical repo, one co
   gh api /users/elementsproject/packages/container/cln-application/versions \
     --jq '.[].metadata.container.tags[]' | sort -u | head -20
   ```
-- Current pin: the `IMAGE` build arg of `images.ui` in `startos/manifest/index.ts` (`ghcr.io/elementsproject/cln-application:<version>`), layered by `Dockerfile.ui`.
+- Current pin: the full CLN Application commit and Node image digests in `Dockerfile.ui`. The SHA-256-checked `assets/ui-xbt.patch` carries the package UI changes.
 
 ### CLBOSS
 
@@ -95,7 +95,7 @@ For each independent upstream source below: a link to its canonical repo, one co
 
 ### CLN Application (Web UI)
 
-- Bump the `IMAGE` build arg for the `ui` image in `startos/manifest/index.ts` to `ghcr.io/elementsproject/cln-application:<new version>`. Once the new image's `NODE_VERSION` is 22.23.4 or later, drop the `node` layer from `Dockerfile.ui`. Keep the file itself, since it also rewrites the explorer links, and check that the rewrite still finds `blockstream.info` in the new image's bundle.
+- Check out the new CLN Application source commit, apply and review `assets/ui-xbt.patch`, and regenerate the patch against that exact base. Update the commit and patch SHA-256 in `Dockerfile.ui`. Keep the upstream npm lockfile and use `npm ci`. The Docker build runs backend and channel/fiat frontend tests before the production build. Test channel labels, splice status, payment chain validation and fiat failure states before publishing; retain the mempool.guide explorer links. No local prebuilt image or wallet data is required.
 
 ### CLBOSS
 

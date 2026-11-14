@@ -1,0 +1,1176 @@
+diff --git a/apps/backend/source/controllers/lightning.ts b/apps/backend/source/controllers/lightning.ts
+index 7aaf650..2f7b268 100755
+--- a/apps/backend/source/controllers/lightning.ts
++++ b/apps/backend/source/controllers/lightning.ts
+@@ -1,3 +1,5 @@
++import { readFile } from 'fs/promises';
++import { isIP } from 'net';
+ import { Request, Response, NextFunction } from 'express';
+ import handleError from '../shared/error-handler.js';
+ import { LightningService } from '../service/lightning.service.js';
+@@ -10,20 +12,21 @@ const ALLOWED_METHODS = new Set([
+   'listfunds',
+   'listpeers',
+   'listpeerchannels',
++  'setchannellabel',
+   'listnodes',
+   'sql',
+   'listsqlschemas',
+   'feerates',
+   'fundchannel',
++  'splicein',
++  'spliceout',
+   'close',
+   'withdraw',
+   'newaddr',
+   'pay',
+   'keysend',
+   'invoice',
+-  'offer',
+   'decode',
+-  'fetchinvoice',
+   'createrune',
+ ]);
+ 
+@@ -33,9 +36,26 @@ export function validateCallRequest(method: unknown, params: unknown): string |
+   if (typeof method !== 'string' || !ALLOWED_METHODS.has(method)) {
+     return 'Method not permitted: ' + String(method);
+   }
+-  if (params !== undefined && (typeof params !== 'object' || params === null)) {
++  if (params !== undefined && (typeof params !== 'object' || params === null || Array.isArray(params))) {
+     return 'Invalid params for ' + method;
+   }
++  if (method === 'setchannellabel') {
++    const p = params as any;
++    if (!p || Object.keys(p).some(k => !['channel_id', 'label'].includes(k)) ||
++        typeof p.channel_id !== 'string' || !/^[0-9a-f]{64}$/.test(p.channel_id) ||
++        typeof p.label !== 'string' || p.label.length > 80 || /[\u0000-\u001f\u007f]/.test(p.label)) {
++      return 'Channel labels require a valid channel ID and at most 80 characters, without control characters';
++    }
++  }
++  if (method === 'splicein' || method === 'spliceout') {
++    const p = params as any;
++    if (!p || Array.isArray(p) || Object.keys(p).some(k => !['channel', 'amount'].includes(k)) ||
++        typeof p.channel !== 'string' || !/^[0-9a-f]{64}$/.test(p.channel) ||
++        typeof p.amount !== 'string' || !/^[1-9][0-9]{0,15}$/.test(p.amount) ||
++        !Number.isSafeInteger(Number(p.amount))) {
++      return 'Splicing requires one channel ID and a positive whole-satoshi amount; fee overrides and scripts are not accepted';
++    }
++  }
+   if (method === 'createrune') {
+     const restrictions = (params as any)?.restrictions;
+     const valid =
+@@ -56,6 +76,25 @@ export function validateCallRequest(method: unknown, params: unknown): string |
+   return null;
+ }
+ 
++// StartOS exports public and LAN endpoints with their actual external ports.
++// This is authenticated UI metadata, separate from lightningd's gossip addresses.
++export function peerUiAddresses(value: unknown): any[] {
++  if (!Array.isArray(value)) return [];
++  return value.flatMap(endpoint => {
++    if (typeof endpoint !== 'string' || endpoint.length > 512) return [];
++    try {
++      const url = new URL(endpoint.includes('://') ? endpoint : 'tcp://' + endpoint.replace(/^\/\//, ''));
++      const host = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
++      const port = Number(url.port);
++      if (url.username || url.password || (url.pathname && url.pathname !== '/') || url.search || url.hash ||
++          !Number.isInteger(port) || port < 1 || port > 65535 ||
++          ['0.0.0.0', '::', 'localhost', '::1'].includes(host) || host.startsWith('127.') ||
++          !/^[a-z0-9.:-]+$/.test(host)) return [];
++      return [{ type: isIP(host) === 6 ? 'ipv6' : isIP(host) === 4 ? 'ipv4' : host.endsWith('.onion') ? 'torv3' : 'dns', address: host, port }];
++    } catch { return []; }
++  });
++}
++
+ export class LightningController {
+   private clnService: LightningService;
+ 
+@@ -70,11 +109,48 @@ export class LightningController {
+         logger.warn('Refused lightning call: ' + validationError);
+         return handleError(new APIError(HttpStatusCode.FORBIDDEN, validationError), req, res, next);
+       }
++      if (req.body.method === 'setchannellabel') {
++        const { channel_id, label } = req.body.params;
++        const channels = await this.clnService.call('listpeerchannels', {});
++        if (!channels.channels?.some((c: any) => c.channel_id === channel_id)) {
++          throw new APIError(HttpStatusCode.INVALID_DATA, 'This channel is no longer available. Refresh the channel list.');
++        }
++        await this.clnService.call('datastore', {
++          key: ['cln-application', 'channel-labels', channel_id], string: label.trim(), mode: 'create-or-replace',
++        });
++        return res.status(200).json({ channel_id, label: label.trim() });
++      }
++      if (req.body.method === 'splicein' || req.body.method === 'spliceout') {
++        const channels = await this.clnService.call('listpeerchannels', {});
++        const channel = channels.channels.find((c: any) => c.channel_id === req.body.params.channel);
++        if (!channel || channel.state !== 'CHANNELD_NORMAL' || !channel.peer_connected || channel.inflight?.length) {
++          throw new APIError(HttpStatusCode.INVALID_DATA, 'Splice requires a connected, active channel with no pending funding transaction. Inspect channel status before retrying.');
++        }
++        const peers = await this.clnService.call('listpeers', { id: channel.peer_id });
++        const features = peers.peers?.[0]?.features;
++        if (!features || !(BigInt('0x' + features) & (3n << 62n))) {
++          throw new APIError(HttpStatusCode.INVALID_DATA, 'The peer has not negotiated splice support (feature 62/63). Enable splicing on the peer and reconnect.');
++        }
++      }
+       logger.info('Calling method: ' + req.body.method);
+       this.clnService
+         .call(req.body.method, req.body.params)
+-        .then((commandRes: any) => {
++        .then(async (commandRes: any) => {
+           logger.info('Controller received response for ' + req.body.method);
++          if (req.body.method === 'listpeerchannels') {
++            const stored = await this.clnService.call('listdatastore', { key: ['cln-application', 'channel-labels'] });
++            const labels = new Map((stored.datastore || []).filter((v: any) =>
++              v.key?.length === 3 && v.key[0] === 'cln-application' && v.key[1] === 'channel-labels' && typeof v.string === 'string'
++            ).map((v: any) => [v.key[2], v.string]));
++            commandRes.channels = commandRes.channels.map((c: any) => ({ ...c, channel_label: labels.get(c.channel_id) || '' }));
++          }
++          if (req.body.method === 'getinfo') {
++            commandRes.peer_addresses = [];
++            if (process.env.PEER_ADDRESSES_FILE) {
++              try { commandRes.peer_addresses = peerUiAddresses(JSON.parse(await readFile(process.env.PEER_ADDRESSES_FILE, 'utf8'))); }
++              catch { logger.warn('StartOS peer addresses unavailable; showing advertised endpoints only'); }
++            }
++          }
+           if (
+             APP_CONSTANTS.APP_CONNECT == AppConnect.COMMANDO &&
+             req.body.method &&
+diff --git a/apps/backend/source/controllers/shared.ts b/apps/backend/source/controllers/shared.ts
+index acfbec5..fc94863 100644
+--- a/apps/backend/source/controllers/shared.ts
++++ b/apps/backend/source/controllers/shared.ts
+@@ -1,4 +1,4 @@
+-import axios from 'axios';
++import { getXbtFiatRate } from '../service/fiat-rates.js';
+ import * as fs from 'fs';
+ import { Request, Response, NextFunction } from 'express';
+ 
+@@ -6,8 +6,6 @@ import {
+   APP_CONSTANTS,
+   DEFAULT_CONFIG,
+   FIAT_CURRENCIES,
+-  FIAT_RATE_API,
+-  FIAT_RATE_CACHE_MS,
+   HttpStatusCode,
+   UI_APP_MODES,
+   UI_UNITS,
+@@ -62,8 +60,6 @@ export function isInvoiceOnlyRune(rune: Rune): boolean {
+   );
+ }
+ 
+-// Last rate fetched per currency, reused for FIAT_RATE_CACHE_MS
+-const fiatRateCache = new Map<string, { rate: number; fetchedAt: number }>();
+ 
+ export class SharedController {
+   private clnService: LightningService;
+@@ -141,37 +137,12 @@ export class SharedController {
+   };
+ 
+   getFiatRate = async (req: Request, res: Response, next: NextFunction) => {
+-    try {
+-      const fiatCurrency = String(req.params.fiatCurrency);
+-      if (!FIAT_CURRENCIES.includes(fiatCurrency)) {
+-        return handleError(
+-          new APIError(HttpStatusCode.BAD_REQUEST, 'Unsupported fiat currency'),
+-          req,
+-          res,
+-          next,
+-        );
+-      }
+-      const cached = fiatRateCache.get(fiatCurrency);
+-      if (cached && Date.now() - cached.fetchedAt < FIAT_RATE_CACHE_MS) {
+-        return res.status(200).json({ rate: cached.rate });
+-      }
+-      logger.info('Getting Fiat Rate for: ' + fiatCurrency);
+-      const response = await axios.get(FIAT_RATE_API + encodeURIComponent(fiatCurrency));
+-      const rate = response.data?.bitcoin?.[fiatCurrency.toLowerCase()];
+-      if (typeof rate !== 'number') {
+-        return handleError(
+-          new APIError(HttpStatusCode.NOT_FOUND, 'Price value not found'),
+-          req,
+-          res,
+-          next,
+-        );
+-      }
+-      fiatRateCache.set(fiatCurrency, { rate, fetchedAt: Date.now() });
+-      return res.status(200).json({ rate });
+-    } catch (error: any) {
+-      logger.error('Error from Fiat Rate: ' + (error?.message || error));
+-      res.status(200).json({ rate: 0 });
++    const currency = String(req.params.fiatCurrency);
++    if (!FIAT_CURRENCIES.includes(currency)) {
++      res.status(400).json({ error: 'Unsupported fiat currency' }); return;
+     }
++    try { res.status(200).json(await getXbtFiatRate(currency)); }
++    catch { res.status(200).json({ rate: 0, available: false, error: 'XBT fiat rate unavailable' }); }
+   };
+ 
+   saveInvoiceRune = async (req: Request, res: Response, next: NextFunction) => {
+diff --git a/apps/backend/source/service/fiat-rates.ts b/apps/backend/source/service/fiat-rates.ts
+new file mode 100644
+index 0000000..50ba140
+--- /dev/null
++++ b/apps/backend/source/service/fiat-rates.ts
+@@ -0,0 +1,57 @@
++import axios from 'axios';
++
++// Fixed public market requests only: never accept wallet amounts, addresses or invoices.
++export const XBT_TICKER_URL = 'https://neoxa.exchange/api/exchange/ticker/BTCB2_USDC';
++export const USD_FX_URL = 'https://api.frankfurter.dev/v1/latest?base=USD';
++const MAX_AGE_MS = 15 * 60 * 1000;
++const CACHE_MS = 5 * 60 * 1000;
++type FetchJson = (url: string) => Promise<any>;
++const fetchJson: FetchJson = async url => (await axios.get(url, {
++  timeout: 10000, maxContentLength: 262144, maxRedirects: 0,
++  headers: { Accept: 'application/json', 'User-Agent': 'XBT-CLN-UI/1.0' },
++})).data;
++
++export function createXbtRateProvider(fetch: FetchJson = fetchJson, clock = Date.now) {
++  let cached: { rates: Record<string, number>; timestamp: number; fetchedAt: number } | undefined;
++  let pending: Promise<void> | undefined;
++  const fresh = (timestamp: number, now: number) => Number.isSafeInteger(timestamp)
++    && timestamp >= now - MAX_AGE_MS && timestamp <= now + 300000;
++  const positive = (value: unknown) => (typeof value === 'number' || typeof value === 'string')
++    && value !== '' && Number.isFinite(Number(value)) && Number(value) > 0;
++  async function refresh() {
++    const now = clock();
++    const data = await fetch(XBT_TICKER_URL);
++    if (data?.success !== true || data?.pair !== 'BTCB2_USDC'
++      || !fresh(data?.ticker?.computedAt, now) || !positive(data?.ticker?.lastPrice)) {
++      throw new Error('Neoxa XBT quote is invalid or stale');
++    }
++    const rates: Record<string, number> = { USD: Number(data.ticker.lastPrice) };
++    try {
++      const fx = await fetch(USD_FX_URL);
++      const date = typeof fx?.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(fx.date)
++        ? Date.parse(fx.date + 'T00:00:00Z') : NaN;
++      if (fx?.base !== 'USD' || !Number.isFinite(date) || date > now + 86400000
++        || date < now - 7 * 86400000 || !fx?.rates || typeof fx.rates !== 'object') {
++        throw new Error('Invalid FX table');
++      }
++      for (const [currency, value] of Object.entries(fx.rates)) {
++        if (/^[A-Z]{3}$/.test(currency) && currency !== 'USD' && positive(value)
++          && positive(rates.USD * Number(value))) rates[currency] = rates.USD * Number(value);
++      }
++    } catch { /* Keep USD available when the separate FX service is unavailable. */ }
++    cached = { rates, timestamp: data.ticker.computedAt, fetchedAt: now };
++  }
++  return async (currency: string) => {
++    const now = clock();
++    if (!cached || now - cached.fetchedAt >= CACHE_MS || !fresh(cached.timestamp, now)) {
++      if (!pending) pending = refresh().finally(() => { pending = undefined; });
++      await pending;
++    }
++    if (!cached || !fresh(cached.timestamp, clock()) || !positive(cached.rates[currency])) {
++      throw new Error('XBT fiat rate unavailable');
++    }
++    return { rate: cached.rates[currency], available: true, timestamp: cached.timestamp,
++      source: 'neoxa.exchange', pair: 'BTCB2_USDC' };
++  };
++}
++export const getXbtFiatRate = createXbtRateProvider();
+diff --git a/apps/backend/source/service/lightning.service.ts b/apps/backend/source/service/lightning.service.ts
+index 0db7321..bd32c72 100755
+--- a/apps/backend/source/service/lightning.service.ts
++++ b/apps/backend/source/service/lightning.service.ts
+@@ -13,6 +13,17 @@ import {
+ import { logger } from '../shared/logger.js';
+ import { setEnvVariables, validateEnvVariables } from '../shared/utils.js';
+ 
++export function requireXbtInvoice(decoded: any) {
++  const features = decoded?.features;
++  if (decoded?.valid !== true || decoded?.type !== 'bolt11 invoice' ||
++      !['bc', 'bcrt'].includes(decoded?.currency) || typeof features !== 'string' ||
++      features.length > 16384 || !/^(?:[0-9a-fA-F]{2})+$/.test(features)) {
++    throw new Error('Use an XBT BOLT11 invoice');
++  }
++  const bits = BigInt('0x' + features);
++  if (!(bits & (1n << 512n)) || (bits & (1n << 513n))) throw new Error('This invoice is not for the XBT chain');
++}
++
+ export class LightningService {
+   private clnService: any = null;
+   private axiosConfig: any = {
+@@ -97,6 +108,12 @@ export class LightningService {
+   };
+ 
+   call = async (method: string, methodParams: Record<string, any>) => {
++    if (method === 'pay') {
++      // The fork deliberately retains Bitcoin HRPs. Generic decode alone is
++      // insufficient; require the XBT invoice bit before submitting a payment.
++      const decoded = await this.call('decode', { string: methodParams?.bolt11 });
++      requireXbtInvoice(decoded);
++    }
+     switch (APP_CONSTANTS.APP_CONNECT) {
+       case AppConnect.REST:
+         return axios
+@@ -114,7 +131,7 @@ export class LightningService {
+             const nodeMessage = err?.response?.data?.error?.message || err?.response?.data?.message;
+             if (nodeMessage) {
+               logger.error(nodeMessage);
+-              throw new LightningError(HttpStatusCode.LIGHTNING_SERVER, nodeMessage);
++              throw new LightningError(HttpStatusCode.LIGHTNING_SERVER, nodeMessage + ' (RPC code: ' + (err?.response?.data?.error?.code ?? err?.response?.data?.code ?? 'unavailable') + ')');
+             }
+             logger.error(err?.message || err?.code || 'Unknown lightning error');
+             throw new LightningError(
+diff --git a/apps/backend/source/shared/consts.ts b/apps/backend/source/shared/consts.ts
+index f131c10..29756a5 100755
+--- a/apps/backend/source/shared/consts.ts
++++ b/apps/backend/source/shared/consts.ts
+@@ -141,7 +141,7 @@ export const APP_CONSTANTS = {
+   LIGHTNING_GRPC_TLS_CERTS: '',
+ };
+ 
+-export const UI_UNITS = ['MSATS', 'SATS', 'BTC'];
++export const UI_UNITS = ['MSATS', 'SATS', 'XBT'];
+ export const UI_APP_MODES = ['LIGHT', 'DARK'];
+ export const FIAT_CURRENCIES = [
+   'USD',
+diff --git a/apps/backend/test/fiat-rates.test.mjs b/apps/backend/test/fiat-rates.test.mjs
+new file mode 100644
+index 0000000..87fba54
+--- /dev/null
++++ b/apps/backend/test/fiat-rates.test.mjs
+@@ -0,0 +1,30 @@
++import { test } from 'node:test';
++import assert from 'node:assert/strict';
++import { createXbtRateProvider, XBT_TICKER_URL, USD_FX_URL } from '../dist/service/fiat-rates.js';
++const now = Date.parse('2026-11-13T20:00:00Z');
++const ticker = (update = {}) => ({ success: true, pair: 'BTCB2_USDC', ticker: { computedAt: now, lastPrice: 250, ...update } });
++test('fixed price-only URLs; shared cache and local FX conversion', async () => {
++  const calls=[]; let time=now;
++  const rate=createXbtRateProvider(async url => { calls.push(url); return url===XBT_TICKER_URL ? ticker({computedAt:time}) : {base:'USD',date:'2026-11-13',rates:{CAD:1.4,USD:99}}; },()=>time);
++  const [usd,cad]=await Promise.all([rate('USD'),rate('CAD')]);
++  assert.equal(usd.rate,250);assert.equal(cad.rate,350);
++  assert.deepEqual(calls,[XBT_TICKER_URL,USD_FX_URL]);
++  await rate('USD');assert.equal(calls.length,2);
++  time+=300001;await rate('USD');assert.equal(calls.length,4);
++});
++test('rejects stale, wrong-market and invalid prices; never substitutes BTC', async () => {
++  for(const data of [ticker({computedAt:now-900001}),ticker({computedAt:now+300001}),ticker({lastPrice:0}),ticker({lastPrice:'NaN'}),ticker({lastPrice:true}),{...ticker(),pair:'BTC_USDC'}]) {
++    const rate=createXbtRateProvider(async url=>{assert.equal(url,XBT_TICKER_URL);return data;},()=>now);
++    await assert.rejects(rate('USD'));
++  }
++});
++test('FX outage preserves USD, never returns USD as another currency', async () => {
++  const rate=createXbtRateProvider(async url=>{if(url===XBT_TICKER_URL)return ticker();throw new Error('offline');},()=>now);
++  assert.equal((await rate('USD')).rate,250);await assert.rejects(rate('CAD'));
++});
++test('stale FX refused and expired cached prices are not served on network failure', async () => {
++  let time=now;let offline=false;
++  const rate=createXbtRateProvider(async url=>{if(offline)throw new Error('offline');return url===XBT_TICKER_URL?ticker():{base:'USD',date:'2025-01-01',rates:{CAD:1.4}};},()=>time);
++  await rate('USD');await assert.rejects(rate('CAD'));
++  time+=900001;offline=true;await assert.rejects(rate('USD'));
++});
+diff --git a/apps/frontend/index.html b/apps/frontend/index.html
+index 5a0a10b..d5487f2 100644
+--- a/apps/frontend/index.html
++++ b/apps/frontend/index.html
+@@ -5,9 +5,9 @@
+     <link rel="icon" href="/images/cln-favicon.ico" />
+     <meta name="viewport" content="width=device-width, initial-scale=1" />
+     <meta name="color-scheme" content="light dark">
+-    <meta name="description" content="Core lightning application" />
++    <meta name="description" content="XBT Core Lightning application" />
+     <link rel="apple-touch-icon" href="/images/cln-logo-dark.png" />
+-    <title>Core Lightning</title>
++    <title>XBT Core Lightning</title>
+   </head>
+   <body>
+     <noscript>You need to enable JavaScript to run this app.</noscript>
+diff --git a/apps/frontend/src/components/cln/BTCDeposit/BTCDeposit.tsx b/apps/frontend/src/components/cln/BTCDeposit/BTCDeposit.tsx
+index edbc15d..7025525 100755
+--- a/apps/frontend/src/components/cln/BTCDeposit/BTCDeposit.tsx
++++ b/apps/frontend/src/components/cln/BTCDeposit/BTCDeposit.tsx
+@@ -50,7 +50,7 @@ const BTCDeposit = props => {
+         <Card.Header className="p-0 d-flex align-items-start justify-content-between">
+           <div className="p-0 fw-bold text-primary d-flex align-items-center">
+             <BitcoinWalletSVG svgClassName="svg-small me-2" className="fill-primary" />
+-            <span className="fw-bold">Bitcoin Wallet</span>
++            <span className="fw-bold">XBT Wallet</span>
+           </div>
+           <span className="span-close-svg" onClick={props.onClose}>
+             <CloseSVG />
+diff --git a/apps/frontend/src/components/cln/BTCTransaction/BTCTransaction.tsx b/apps/frontend/src/components/cln/BTCTransaction/BTCTransaction.tsx
+index 48bac12..4e79608 100755
+--- a/apps/frontend/src/components/cln/BTCTransaction/BTCTransaction.tsx
++++ b/apps/frontend/src/components/cln/BTCTransaction/BTCTransaction.tsx
+@@ -101,7 +101,7 @@ const BTCTransaction = (props) => {
+   const nodeInfo = useSelector(selectNodeInfo);
+   
+   const openLinkHandler = (event) => {
+-    window.open('https://blockstream.info/' + (nodeInfo.network === 'testnet' ? 'testnet/' : '') + 'tx/' + event.target.id, '_blank', 'noopener,noreferrer');
++    window.open('https://mempool.guide/' + (nodeInfo.network === 'testnet' ? 'testnet/' : '') + 'tx/' + event.target.id, '_blank', 'noopener,noreferrer');
+   };
+ 
+   const copyHandler = event => {
+diff --git a/apps/frontend/src/components/cln/BTCWallet/BTCWallet.tsx b/apps/frontend/src/components/cln/BTCWallet/BTCWallet.tsx
+index 90d2be5..d06eb30 100755
+--- a/apps/frontend/src/components/cln/BTCWallet/BTCWallet.tsx
++++ b/apps/frontend/src/components/cln/BTCWallet/BTCWallet.tsx
+@@ -54,7 +54,7 @@ const BTCWallet = (props) => {
+             <Col xs={12} className="ps-2 pt-2 d-flex align-items-center justify-content-start">
+               <BitcoinWalletSVG svgClassName="me-4" className="fill-contrast" />
+               <div>
+-                <div className='fs-6 fw-bold'>Bitcoin Wallet</div>
++                <div className='fs-6 fw-bold'>XBT Wallet</div>
+                 { isAuthenticated && walletBalances.isLoading ? 
+                     <Spinner animation='grow' variant='secondary' data-testid="btc-wallet-spinner"/> : 
+                   walletBalances.error ? 
+diff --git a/apps/frontend/src/components/cln/BTCWithdraw/BTCWithdraw.tsx b/apps/frontend/src/components/cln/BTCWithdraw/BTCWithdraw.tsx
+index 7ed4d8d..9995bc5 100755
+--- a/apps/frontend/src/components/cln/BTCWithdraw/BTCWithdraw.tsx
++++ b/apps/frontend/src/components/cln/BTCWithdraw/BTCWithdraw.tsx
+@@ -127,7 +127,7 @@ const BTCWithdraw = (props) => {
+           <Card.Header className='p-0 d-flex align-items-start justify-content-between'>
+             <div className='p-0 fw-bold text-primary d-flex align-items-center'>
+               <BitcoinWalletSVG svgClassName='svg-small me-2' className='fill-primary' />
+-              <span className='fw-bold'>Bitcoin Wallet</span>
++              <span className='fw-bold'>XBT Wallet</span>
+             </div>
+             <span role='button' data-testid='close-button' className='span-close-svg' onClick={props.onClose}><CloseSVG /></span>
+           </Card.Header>
+diff --git a/apps/frontend/src/components/cln/CLNReceive/CLNReceive.tsx b/apps/frontend/src/components/cln/CLNReceive/CLNReceive.tsx
+index b361609..d3f7901 100755
+--- a/apps/frontend/src/components/cln/CLNReceive/CLNReceive.tsx
++++ b/apps/frontend/src/components/cln/CLNReceive/CLNReceive.tsx
+@@ -164,7 +164,7 @@ const CLNReceive = (props) => {
+               <Row className='d-flex align-items-start justify-content-center'>
+                 <Col xs={12} className='mb-3 d-flex align-items-start justify-content-start'>
+                   <Form.Check tabIndex={1} onChange={paymentTypeChangeHandler} checked={paymentType === PaymentType.INVOICE} inline className='text-dark' label='Invoice' name='payType' type='radio' id='Invoice' />
+-                  <Form.Check tabIndex={2} onChange={paymentTypeChangeHandler} checked={paymentType === PaymentType.OFFER} inline className='ms-3 text-dark' label='Offer' name='payType' type='radio' id='Offer' />
++                  <Form.Check tabIndex={2} onChange={paymentTypeChangeHandler} disabled title='BOLT12 support is not enabled in this XBT candidate' checked={paymentType === PaymentType.OFFER} inline className='ms-3 text-dark' label='Offer' name='payType' type='radio' id='Offer' />
+                 </Col>
+                 <Col xs={12}>
+                   <Form.Label className='text-dark'>Description*</Form.Label>
+diff --git a/apps/frontend/src/components/cln/CLNSend/CLNSend.tsx b/apps/frontend/src/components/cln/CLNSend/CLNSend.tsx
+index ab173c9..e08ce77 100755
+--- a/apps/frontend/src/components/cln/CLNSend/CLNSend.tsx
++++ b/apps/frontend/src/components/cln/CLNSend/CLNSend.tsx
+@@ -233,7 +233,7 @@ const CLNSend = (props) => {
+                 <Form.Check
+                   tabIndex={2}
+                   onChange={paymentTypeChangeHandler}
+-                  checked={paymentType === PaymentType.OFFER}
++                  disabled title='BOLT12 support is not enabled in this XBT candidate' checked={paymentType === PaymentType.OFFER}
+                   inline
+                   className="text-dark"
+                   label="Offer"
+diff --git a/apps/frontend/src/components/cln/ChannelDetails/ChannelDetails.scss b/apps/frontend/src/components/cln/ChannelDetails/ChannelDetails.scss
+index ec4248d..4c6beea 100644
+--- a/apps/frontend/src/components/cln/ChannelDetails/ChannelDetails.scss
++++ b/apps/frontend/src/components/cln/ChannelDetails/ChannelDetails.scss
+@@ -3,6 +3,19 @@
+ 
+ .channel-scroll-container {
+   max-height: 53vh;
++  min-width: 0;
++  & .channel-balance-summary, & .channel-peer-heading, & .channel-peer-name {
++    min-width: 0;
++    max-width: 100%;
++  }
++  & .channel-peer-name {
++    overflow-wrap: anywhere;
++    white-space: normal;
++  }
++  & .channel-peer-heading .dot {
++    flex-shrink: 0;
++    margin-top: 0.45em;
++  }
+   & .progress {
+     height: 6px;
+   }
+diff --git a/apps/frontend/src/components/cln/ChannelDetails/ChannelDetails.tsx b/apps/frontend/src/components/cln/ChannelDetails/ChannelDetails.tsx
+index cb3254e..167f4a5 100755
+--- a/apps/frontend/src/components/cln/ChannelDetails/ChannelDetails.tsx
++++ b/apps/frontend/src/components/cln/ChannelDetails/ChannelDetails.tsx
+@@ -1,4 +1,8 @@
++import { localLiquidityPercent } from '../../../utilities/channel-status';
+ import './ChannelDetails.scss';
++import ChannelLabel from './ChannelLabel';
++import SpliceChannel from './SpliceChannel';
++import SpliceStatus from './SpliceStatus';
+ import { useState } from 'react';
+ import PerfectScrollbar from 'react-perfect-scrollbar';
+ import { Spinner, Card, Row, Col, ProgressBar, OverlayTrigger, Tooltip } from 'react-bootstrap';
+@@ -24,12 +28,12 @@ const ChannelDetails = (props) => {
+   const nodeInfo = useSelector(selectNodeInfo);
+   const showToast = useSelector(selectShowToast);
+   const [showToastState, setShowToastState] = useState(false);
+-  const [channelClosed, setChannelClosed] = useState(props.selChannel.current_state !== 'ACTIVE' && props.selChannel.state !== 'CHANNELD_NORMAL');
++  const [channelClosed, setChannelClosed] = useState(false);
+   const [responseStatus, setResponseStatus] = useState(CallStatus.NONE);
+   const [responseMessage, setResponseMessage] = useState('');
+ 
+   const openLinkHandler = (event) => {
+-    window.open('https://blockstream.info/' + (nodeInfo.network === 'testnet' ? 'testnet/' : '') + 'tx/' + event.target.id, '_blank', 'noopener,noreferrer');
++    window.open('https://mempool.guide/' + (nodeInfo.network === 'testnet' ? 'testnet/' : '') + 'tx/' + event.target.id, '_blank', 'noopener,noreferrer');
+   };
+ 
+   const ChannelCloseHandler = event => {
+@@ -115,20 +119,20 @@ const ChannelDetails = (props) => {
+           <Card.Body className='pt-1 pb-0 px-1 d-flex flex-column align-items-stretch justify-content-between channel-scroll-container'>
+             <PerfectScrollbar options={{ suppressScrollX: true }}>
+               <Row className='d-flex align-items-start justify-content-start'>
+-                <Col className='me-3'>
++                <Col className='me-3 channel-balance-summary'>
+                   <OverlayTrigger
+                     placement='auto'
+                     delay={{ show: 250, hide: 250 }}
+                     overlay={<Tooltip>{titleCase(props.selChannel.current_state) + ' - ' + (channelStateMap[props.selChannel.state] ?? titleCase(props.selChannel.state?.replaceAll('_', ' ')))}</Tooltip>}
+                   >
+-                    <span className='d-flex align-items-center justify-content-start fw-bold'>
++                    <span className='d-flex align-items-start justify-content-start fw-bold channel-peer-heading'>
+                       <div className={'d-inline-block mx-1 dot ' + (props.selChannel.current_state?.toLowerCase() === 'active' ? 'bg-success' : props.selChannel.current_state?.toLowerCase() === 'pending' ? 'bg-warning' : 'bg-danger')}></div>
+-                      {props.selChannel.node_alias}
++                      <span className='channel-peer-name'>{props.selChannel.channel_label || props.selChannel.node_alias || props.selChannel.peer_id}</span>
+                     </span>
+                   </OverlayTrigger>
+                   <ProgressBar>
+-                    <ProgressBar variant='primary' now={(props.selChannel.to_us_sat > 1000000 || props.selChannel.to_them_sat > 1000000) ? (props.selChannel.to_us_sat / 1000) : props.selChannel.to_us_sat} key={1} />
+-                    <ProgressBar variant='light' now={(props.selChannel.to_us_sat > 1000000 || props.selChannel.to_them_sat > 1000000) ? (props.selChannel.to_them_sat / 1000) : props.selChannel.to_them_sat} key={2} />
++                    <ProgressBar variant='primary' now={localLiquidityPercent(props.selChannel.to_us_sat, props.selChannel.to_them_sat)} key={1} />
++                    <ProgressBar variant='light' now={localLiquidityPercent(props.selChannel.to_them_sat, props.selChannel.to_us_sat)} key={2} />
+                   </ProgressBar>
+                   <Row className='text-light d-flex align-items-end justify-content-between'>
+                     <Col xs={6} className='fs-7 fw-bold d-flex justify-content-start text-primary'>
+@@ -139,6 +143,22 @@ const ChannelDetails = (props) => {
+                     </Col>
+                   </Row>
+                 </Col>
++                <ChannelLabel key={props.selChannel.channel_id} channel={props.selChannel} />
++                <SpliceStatus channel={props.selChannel} detailed />
++                <Row className='mt-12px'>
++                  <Col xs={12} className='fs-7 text-light'>Counterparty node ID</Col>
++                  <Col xs={12} className='fw-bold' style={{ overflowWrap: 'anywhere' }}>{props.selChannel.peer_id}</Col>
++                  <Col xs={12}><button type="button" className="btn-rounded bg-primary mt-2" onClick={() => copyTextToClipboard(props.selChannel.peer_id).then(() => dispatch(setShowToast({show: true, message: 'Node ID copied', bg: 'success'}))).catch(error => { setResponseStatus(CallStatus.ERROR); setResponseMessage('Could not copy node ID: ' + String(error)); })}>Copy node ID</button></Col>
++                </Row>
++                <Row className='mt-12px'>
++                  <Col xs={12} className='fs-7 text-light'>Node URI</Col>
++                  <Col xs={12}>
++                    {props.selChannel.node_uris?.length ? props.selChannel.node_uris.map(uri => <div key={uri} className="mb-2">
++                      <div className="fw-bold" style={{ overflowWrap: 'anywhere' }}>{uri}</div>
++                      <button type="button" className="btn-rounded bg-primary mt-2" onClick={() => copyTextToClipboard(uri).then(() => dispatch(setShowToast({show: true, message: 'Node URI copied', bg: 'success'}))).catch(error => { setResponseStatus(CallStatus.ERROR); setResponseMessage('Could not copy node URI: ' + String(error)); })}>Copy node URI</button>
++                    </div>) : <span className="text-light">This peer has not advertised a connection address. Ask its operator for a node URI.</span>}
++                  </Col>
++                </Row>
+                 <Row className='mt-1'>
+                   <Col xs={12} className='fs-7 text-light'>Short Channel Id</Col>
+                   <Col xs={12} className='pe-1 overflow-x-ellipsis fw-bold'>
+@@ -193,6 +213,7 @@ const ChannelDetails = (props) => {
+                   <Col xs={1} onClick={openLinkHandler} className='btn-sm-svg btn-svg-open'><OpenLinkSVG id={props.selChannel.funding_txid} /></Col>
+                 </Row>
+               </Row>
++              <SpliceChannel channel={props.selChannel} />
+               <ToastMessage
+                 showOnComponent={true}
+                 show={showToastState}
+@@ -210,7 +231,7 @@ const ChannelDetails = (props) => {
+               <></>
+             )}
+           </Card.Body>
+-          {channelClosed ? (
++          {channelClosed || !['ACTIVE', 'INACTIVE'].includes(props.selChannel.current_state) ? (
+             <></>
+           ) : (
+             <Card.Footer className="d-flex justify-content-center">
+diff --git a/apps/frontend/src/components/cln/ChannelDetails/ChannelLabel.tsx b/apps/frontend/src/components/cln/ChannelDetails/ChannelLabel.tsx
+new file mode 100644
+index 0000000..3e70bd2
+--- /dev/null
++++ b/apps/frontend/src/components/cln/ChannelDetails/ChannelLabel.tsx
+@@ -0,0 +1,37 @@
++import { useEffect, useState } from 'react';
++import { Form, Alert, InputGroup } from 'react-bootstrap';
++import { useDispatch } from 'react-redux';
++import { HttpService } from '../../../services/http.service';
++import { setChannelLabel } from '../../../store/rootSlice';
++
++export default function ChannelLabel({ channel }) {
++  const dispatch = useDispatch();
++  const [label, setLabel] = useState(channel.channel_label || '');
++  const [editing, setEditing] = useState(false);
++  const [saving, setSaving] = useState(false);
++  const [message, setMessage] = useState('');
++  const [error, setError] = useState('');
++  useEffect(() => { if (!editing) setLabel(channel.channel_label || ''); }, [channel.channel_label, editing]);
++  const save = async () => {
++    if (saving) return;
++    setSaving(true); setMessage(''); setError('');
++    try {
++      const result: any = await HttpService.clnCall('setchannellabel', { channel_id: channel.channel_id, label });
++      dispatch(setChannelLabel(result));
++      setEditing(false); setMessage(result.label ? 'Channel label saved.' : 'Channel label removed.');
++    } catch (e) { setError('Could not save channel label: ' + String(e)); }
++    finally { setSaving(false); }
++  };
++  return <section className="mt-3 mb-3" data-testid="channel-label-editor">
++    <Form.Label className="text-dark" htmlFor="channel-label">Channel label</Form.Label>
++    <InputGroup><Form.Control id="channel-label" maxLength={80} value={label} disabled={saving}
++      placeholder="Optional" onChange={e => { setLabel(e.target.value); setEditing(true); setMessage(''); }} /></InputGroup>
++    <div className="fs-7 text-light mt-1">Private to your node. Leave blank to use the peer alias.</div>
++    <div className="d-flex gap-2 mt-2">
++      <button type="button" className="btn-rounded bg-primary" onClick={save} disabled={saving || !editing}>{saving ? 'Saving…' : 'Save label'}</button>
++      {editing && <button type="button" className="btn-rounded" disabled={saving} onClick={() => { setEditing(false); setError(''); }}>Cancel</button>}
++    </div>
++    {message && <p role="status" className="mt-2">{message}</p>}
++    {error && <Alert variant="danger" className="mt-2">{error}</Alert>}
++  </section>;
++}
+diff --git a/apps/frontend/src/components/cln/ChannelDetails/SpliceChannel.tsx b/apps/frontend/src/components/cln/ChannelDetails/SpliceChannel.tsx
+new file mode 100644
+index 0000000..448f7a4
+--- /dev/null
++++ b/apps/frontend/src/components/cln/ChannelDetails/SpliceChannel.tsx
+@@ -0,0 +1,82 @@
++import { useRef, useState } from 'react';
++import { Alert, Form, InputGroup } from 'react-bootstrap';
++import { HttpService } from '../../../services/http.service';
++
++// Keep an unresolved submission visible even after closing the channel drawer.
++export default function SpliceChannel({ channel }) {
++  const key = 'splice:' + channel.channel_id;
++  const [direction, setDirection] = useState('splicein');
++  const [amount, setAmount] = useState('');
++  const [review, setReview] = useState(false);
++  const [record, setRecord] = useState(() => JSON.parse(localStorage.getItem(key) || 'null'));
++  const [settled, setSettled] = useState(false);
++  const [aborted, setAborted] = useState(false);
++  const [status, setStatus] = useState('');
++  const submitting = useRef(false);
++  const confirmed = settled || (!!record?.txid && channel.state === 'CHANNELD_NORMAL' && channel.funding_txid === record.txid);
++  const save = (value) => { localStorage.setItem(key, JSON.stringify(value)); setRecord(value); };
++  const valid = /^[1-9][0-9]{0,15}$/.test(amount) && Number.isSafeInteger(Number(amount));
++  const available = channel.state === 'CHANNELD_NORMAL' && channel.peer_connected !== false;
++  const submit = async () => {
++    if (!valid || !available || record || submitting.current) return;
++    submitting.current = true;
++    setReview(false);
++    const pending = { direction, amount, funding: channel.funding_txid, time: new Date().toISOString() };
++    save(pending);
++    setStatus('Negotiating splice with the peer. Do not submit another splice.');
++    try {
++      const result: any = await HttpService.clnCall(direction, { channel: channel.channel_id, amount });
++      save({ ...pending, txid: result.txid, result: result.txid ? 'Broadcast; waiting for confirmations.' : 'Node returned without a transaction ID; check channel status before retrying.' });
++      setStatus('');
++    } catch (error) {
++      save({ ...pending, error: String(error) });
++      setStatus('');
++    } finally { submitting.current = false; }
++  };
++  const refresh = async () => {
++    try {
++      const result: any = await HttpService.clnCall('listpeerchannels', { id: channel.peer_id });
++      const current = result.channels.find(c => c.channel_id === channel.channel_id);
++      if (!current) { setStatus('Channel not found. Do not repeat the splice.'); return; }
++      setAborted(!!record?.error && current.state === 'CHANNELD_NORMAL' && !current.inflight?.length && current.funding_txid === record.funding);
++      setSettled(current.state === 'CHANNELD_NORMAL' && !current.inflight?.length && !!record?.txid && current.funding_txid === record.txid);
++      setStatus('State: ' + current.state + '; capacity: ' + (Number(current.total_msat) / 1000).toLocaleString() +
++        ' sats; funding transaction: ' + current.funding_txid + '; pending splices: ' + (current.inflight?.length || 0));
++    } catch (error) { setStatus('Status check failed: ' + String(error)); }
++  };
++  if (!record && channel.state === 'CHANNELD_AWAITING_SPLICE') return null;
++  return <section className="mt-4 mb-3" aria-label="Splice channel">
++    <h5>Splice channel</h5>
++    <p className="fs-7">Add on-chain funds or withdraw local funds without closing the channel. Both nodes must support splicing.</p>
++    {record ? <Alert variant={record.error ? 'warning' : 'info'}>
++      <div>{record.direction === 'splicein' ? 'Splice in' : 'Splice out'}: {Number(record.amount).toLocaleString()} sats</div>
++      <div>{record.time}</div>
++      <div style={{ overflowWrap: 'anywhere' }}>{confirmed ? 'Splice confirmed.' : (record.error || record.result || 'Submission in progress or outcome unknown.')}</div>
++      {record.txid && <div style={{ overflowWrap: 'anywhere' }}>Transaction: {record.txid}</div>}
++      <p>Check the channel and transaction before any further splice. A lost reply does not mean it failed.</p>
++      <button type="button" className="btn-rounded bg-primary" onClick={refresh}>Refresh splice status</button>
++      {aborted && <div className="mt-2"><p>The node reports the original funding transaction and no pending splice. Check wallet transactions before dismissing this failed attempt.</p><button type="button" className="btn-rounded" onClick={() => {
++        const history = JSON.parse(localStorage.getItem(key + ':history') || '[]');
++        localStorage.setItem(key + ':history', JSON.stringify([...history, record].slice(-20)));
++        localStorage.removeItem(key); setRecord(null); setAborted(false);
++      }}>Dismiss failed attempt</button></div>}
++      {confirmed && <button type="button" className="btn-rounded mt-2" onClick={() => { localStorage.removeItem(key); setRecord(null); setSettled(false); }}>Splice confirmed — dismiss result</button>}
++    </Alert> : <>
++      <Form.Label className="text-dark" htmlFor="splice-direction">Direction</Form.Label>
++      <InputGroup><Form.Select className="form-control" id="splice-direction" value={direction} onChange={e => { setDirection(e.target.value); setReview(false); }}>
++        <option value="splicein">Add funds from on-chain wallet</option>
++        <option value="spliceout">Withdraw funds to on-chain wallet</option>
++      </Form.Select></InputGroup>
++      <Form.Label className="mt-2 text-dark" htmlFor="splice-amount">Amount in sats</Form.Label>
++      <InputGroup><Form.Control id="splice-amount" inputMode="numeric" value={amount} onChange={e => { setAmount(e.target.value); setReview(false); }} /></InputGroup>
++      <p className="fs-7 mt-2">{direction === 'splicein' ? 'The network fee is paid separately from the on-chain wallet.' : 'The network fee is also deducted from channel funds.'} Core Lightning selects the fee rate with its normal fee safety checks.</p>
++      {!available && <p>Connect the peer and wait for the channel to become active before splicing.</p>}
++      {review ? <Alert variant="warning">
++        <p>Confirm {direction === 'splicein' ? 'adding' : 'withdrawing'} {Number(amount).toLocaleString()} sats {direction === 'splicein' ? 'to' : 'from'} this channel, plus the network fee?</p>
++        <button type="button" className="btn-rounded bg-primary me-2" onClick={submit}>Confirm splice</button>
++        <button type="button" className="btn-rounded" onClick={() => setReview(false)}>Cancel</button>
++      </Alert> : <button type="button" className="btn-rounded bg-primary" disabled={!valid || !available} onClick={() => setReview(true)}>Review splice</button>}
++    </>}
++    {status && <p role="status" style={{ overflowWrap: 'anywhere' }}>{status}</p>}
++  </section>;
++}
+diff --git a/apps/frontend/src/components/cln/ChannelDetails/SpliceStatus.tsx b/apps/frontend/src/components/cln/ChannelDetails/SpliceStatus.tsx
+new file mode 100644
+index 0000000..b850180
+--- /dev/null
++++ b/apps/frontend/src/components/cln/ChannelDetails/SpliceStatus.tsx
+@@ -0,0 +1,18 @@
++export default function SpliceStatus({ channel, detailed = false }) {
++  if (channel.state !== 'CHANNELD_AWAITING_SPLICE') return null;
++  const pending = channel.pending_splices || [];
++  return <div className="mt-2 mb-2 fs-7" role="status" aria-label="Pending splice">
++    {pending.length ? pending.map(splice => <div key={splice.txid} className="mb-2">
++      <div className="fw-bold text-warning">Splice pending: {splice.delta > 0 ? '+' : ''}{splice.delta.toLocaleString()} sats</div>
++      <div className="text-dark">{splice.confirmations === null ? 'Confirmation count unavailable' :
++        splice.confirmations === 0 ? '0 confirmations · waiting to be mined' :
++        splice.confirmations.toLocaleString() + (splice.confirmations === 1 ? ' confirmation' : ' confirmations') + ' · waiting for both peers to lock the splice'}</div>
++      {detailed && <>
++        <div className="text-dark">Channel capacity after splice: {splice.capacity.toLocaleString()} sats</div>
++        <div className="text-light" style={{ overflowWrap: 'anywhere' }}>Splice transaction: {splice.txid}</div>
++      </>}
++    </div>) : <div className="fw-bold text-warning">Splice pending · waiting for both peers to lock the splice</div>}
++    {detailed && <div className="text-light">Balances above show the current funding. The new capacity is pending. The peer’s required confirmation count is not reported by Core Lightning.</div>}
++    {channel.splice_status_error && <div className="text-danger">Confirmation lookup failed: {channel.splice_status_error}</div>}
++  </div>;
++}
+diff --git a/apps/frontend/src/components/cln/Channels/Channels.scss b/apps/frontend/src/components/cln/Channels/Channels.scss
+index aa5069f..c03f959 100644
+--- a/apps/frontend/src/components/cln/Channels/Channels.scss
++++ b/apps/frontend/src/components/cln/Channels/Channels.scss
+@@ -3,6 +3,18 @@
+ 
+ .channels-scroll-container {
+   overflow: hidden;
++  min-width: 0;
++  & .list-item-div {
++    min-width: 0;
++    max-width: 100%;
++  }
++  & .channel-peer-name {
++    overflow-wrap: anywhere;
++  }
++  & .list-item-channel {
++    min-width: 0;
++    max-width: 100%;
++  }
+   & .scrollbar-container.ps.ps--active-y .list-channels {
+     & .list-item-channel {
+       margin-right: 0.5rem;
+diff --git a/apps/frontend/src/components/cln/Channels/Channels.test.tsx b/apps/frontend/src/components/cln/Channels/Channels.test.tsx
+index fe7054f..648abdb 100644
+--- a/apps/frontend/src/components/cln/Channels/Channels.test.tsx
++++ b/apps/frontend/src/components/cln/Channels/Channels.test.tsx
+@@ -1,5 +1,6 @@
+ import { screen } from '@testing-library/react';
+ import Channels from './Channels';
++import { localLiquidityPercent } from '../../../utilities/channel-status';
+ import { mockAppStore, mockBKPRStoreData, mockCLNStoreData, mockListChannels, mockRootStoreData } from '../../../utilities/test-utilities/mockData';
+ import { renderWithProviders } from '../../../utilities/test-utilities/mockStore';
+ 
+@@ -71,3 +72,15 @@ describe('Channels component ', () => {
+   })
+ 
+ });
++
++describe('channel liquidity proportions', () => {
++  it('keeps small and large channels on the same percentage scale', () => {
++    expect(localLiquidityPercent(75, 25)).toBe(75);
++    expect(localLiquidityPercent(7500000, 2500000)).toBe(75);
++    expect(localLiquidityPercent(0, 10000000)).toBe(0);
++    expect(localLiquidityPercent(10000000, 0)).toBe(100);
++    expect(localLiquidityPercent(0, 0)).toBe(0);
++    expect(localLiquidityPercent(NaN, 100)).toBe(0);
++    expect(localLiquidityPercent(-1, 100)).toBe(0);
++  });
++});
+diff --git a/apps/frontend/src/components/cln/Channels/Channels.tsx b/apps/frontend/src/components/cln/Channels/Channels.tsx
+index e60274b..1385030 100755
+--- a/apps/frontend/src/components/cln/Channels/Channels.tsx
++++ b/apps/frontend/src/components/cln/Channels/Channels.tsx
+@@ -1,4 +1,6 @@
++import { localLiquidityPercent } from '../../../utilities/channel-status';
+ import './Channels.scss';
++import SpliceStatus from '../ChannelDetails/SpliceStatus';
+ import { motion } from 'framer-motion';
+ import PerfectScrollbar from 'react-perfect-scrollbar';
+ import { Spinner, Card, Row, Col, ListGroup, Alert, ProgressBar, OverlayTrigger, Tooltip } from 'react-bootstrap';
+@@ -34,7 +36,7 @@ const Channels = (props) => {
+                   {listChannels.mergedChannels.map((channel, idx) => (
+                     <motion.li
+                       data-testid='list-item-channel'
+-                      key={channel.short_channel_id || channel.node_alias || idx}
++                      key={channel.channel_id || channel.short_channel_id || idx}
+                       className={'list-group-item list-item-channel ' + (props.newlyOpenedChannelId === channel.channel_id ? 'newly-opened' : '')}
+                       variants={props.newlyOpenedChannelId === channel.channel_id ? STAGERRED_SPRING_VARIANTS_3 : {}} initial='hidden' animate='visible' exit='hidden' custom={0}
+                       onClick={() => (props.onChannelClick(channel))}
+@@ -47,15 +49,16 @@ const Channels = (props) => {
+                               delay={{ show: 250, hide: 250 }}
+                               overlay={<Tooltip>{titleCase(channel.current_state) + ' - ' + (channelStateMap[channel.state] ?? titleCase(channel.state?.replaceAll('_', ' ')))}</Tooltip>}
+                               >
+-                              <span data-testid='channel-node-alias'>
++                              <span className='channel-peer-name' data-testid='channel-node-alias'>
+                                 <div className={'d-inline-block mx-1 dot ' + (channel.current_state?.toLowerCase() === 'active' ? 'bg-success' : channel.current_state?.toLowerCase() === 'pending' ? 'bg-warning' : 'bg-danger')}></div>
+-                                {channel.node_alias}
++                                {channel.channel_label || channel.node_alias || channel.peer_id}
+                               </span>
+                             </OverlayTrigger>
+                           </div>
++                          <SpliceStatus channel={channel} />
+                           <ProgressBar>
+-                            <ProgressBar variant='primary' now={(channel.to_us_sat > 1000000 || channel.to_them_sat > 1000000) ? (channel.to_us_sat / 1000) : channel.to_us_sat} key={1} />
+-                            <ProgressBar variant='light' now={(channel.to_us_sat > 1000000 || channel.to_them_sat > 1000000) ? (channel.to_them_sat / 1000) : channel.to_them_sat} key={2} />
++                            <ProgressBar variant='primary' now={localLiquidityPercent(channel.to_us_sat, channel.to_them_sat)} key={1} />
++                            <ProgressBar variant='light' now={localLiquidityPercent(channel.to_them_sat, channel.to_us_sat)} key={2} />
+                           </ProgressBar>
+                           <Row className='text-light d-flex align-items-end justify-content-between'>
+                             <Col xs={6} className='fs-7 fw-bold d-flex justify-content-start text-primary'>
+diff --git a/apps/frontend/src/components/cln/ChannelsCard/ChannelsCard.tsx b/apps/frontend/src/components/cln/ChannelsCard/ChannelsCard.tsx
+index d53af4d..b878f6d 100755
+--- a/apps/frontend/src/components/cln/ChannelsCard/ChannelsCard.tsx
++++ b/apps/frontend/src/components/cln/ChannelsCard/ChannelsCard.tsx
+@@ -1,5 +1,7 @@
+ import './ChannelsCard.scss';
+ import { useState } from 'react';
++import { useSelector } from 'react-redux';
++import { selectListChannels } from '../../../store/rootSelectors';
+ import { motion, AnimatePresence } from 'framer-motion';
+ import { Card } from 'react-bootstrap';
+ 
+@@ -12,6 +14,8 @@ import { PeerChannel } from '../../../types/root.type';
+ const ChannelsCard = () => {
+   const [selChannelCard, setSelChannelCard] = useState('channels');
+   const [selChannel, setSelChannel] = useState<PeerChannel | null>(null);
++  const channels = useSelector(selectListChannels);
++  const liveChannel = channels.mergedChannels?.find(c => c.channel_id === selChannel?.channel_id) || selChannel;
+   const [newlyOpenedChannelId, setNewlyOpenedChannelId] = useState<string>('');
+ 
+   const onCloseHandler = channelId => {
+@@ -38,7 +42,7 @@ const ChannelsCard = () => {
+           ) : selChannelCard === 'details' ? (
+             <ChannelDetails 
+               onClose={() => setSelChannelCard('channels')}
+-              selChannel={selChannel}
++              selChannel={liveChannel}
+               onChannelStateChange={(newState) => setSelChannel(prev => 
+                 prev ? { ...prev, current_state: newState } as PeerChannel : null
+               )}
+diff --git a/apps/frontend/src/components/modals/NodeInfo/NodeInfo.tsx b/apps/frontend/src/components/modals/NodeInfo/NodeInfo.tsx
+index b169e27..2390311 100755
+--- a/apps/frontend/src/components/modals/NodeInfo/NodeInfo.tsx
++++ b/apps/frontend/src/components/modals/NodeInfo/NodeInfo.tsx
+@@ -1,5 +1,6 @@
+ import './NodeInfo.scss';
+ import { useEffect, useState } from 'react';
++import { nodeUris } from '../../../utilities/channel-status';
+ import { motion, AnimatePresence } from 'framer-motion';
+ import { QRCodeCanvas } from 'qrcode.react';
+ import { Modal, Row, InputGroup, Form } from 'react-bootstrap';
+@@ -20,20 +21,15 @@ const NodeInfo = () => {
+   const [nodeURI, setNodeURI] = useState('');
+ 
+   useEffect(() => {
+-    let uri = (nodeInfo.id || '');
+-    if (nodeInfo.address && nodeInfo.address?.length && nodeInfo.address.length > 0) {
+-      uri = uri + '@' + nodeInfo.address[0].address + ':' + nodeInfo.address[0].port;
+-    } else if (nodeInfo.binding && nodeInfo.binding?.length && nodeInfo.binding.length > 0) {
+-      uri = uri + '@' + nodeInfo.binding[0].address + ':' + nodeInfo.binding[0].port;
+-    } else {
+-      uri = uri + '@ : ';
+-    }
+-    setNodeURI(uri);
++    const uris = nodeUris(nodeInfo.id || '', [...(nodeInfo.address || []), ...(nodeInfo.peer_addresses || [])]);
++    setNodeURI(previous => uris.includes(previous) ? previous : (uris[0] || ''));
+   }, [nodeInfo]);
+ 
++  const uris = nodeUris(nodeInfo.id || '', [...(nodeInfo.address || []), ...(nodeInfo.peer_addresses || [])]);
++
+   const copyHandler = () => {
+-    copyTextToClipboard(nodeURI).then(() => {
+-      dispatch(setShowToast({show: true, message: 'Node ID Copied Successfully!', bg: 'success'}));
++    copyTextToClipboard(nodeURI || nodeInfo.id || '').then(() => {
++      dispatch(setShowToast({show: true, message: nodeURI ? 'Node URI copied' : 'Node ID copied', bg: 'success'}));
+     }).catch((err) => {
+       logger.error(err);
+     });
+@@ -49,7 +45,7 @@ const NodeInfo = () => {
+           <span className='span-close-svg' onClick={closeHandler}><CloseSVG /></span>
+         </Modal.Header>
+         <Modal.Body className='py-0'>
+-          <Row className='qr-container m-auto d-flex'>
++          {nodeURI && <Row className='qr-container m-auto d-flex'>
+             <AnimatePresence>
+               <motion.img
+                 key='cln-logo'
+@@ -62,18 +58,21 @@ const NodeInfo = () => {
+               />
+             </AnimatePresence>
+             <QRCodeCanvas value={nodeURI || ''} size={220} includeMargin={true} bgColor={isDarkMode ? '#0C0C0F' : '#FFFFFF'} fgColor={isDarkMode ? '#FFFFFF' : '#000000'} />
+-          </Row>
++          </Row>}
+           <Row className='d-flex align-items-start justify-content-center pt-2'>
+-            <h4 className='text-blue fw-bold d-flex justify-content-center'>Node ID</h4>
++            <h4 className='text-blue fw-bold d-flex justify-content-center'>{nodeURI ? 'Node URI' : 'Node ID'}</h4>
+             <p className='py-3 w-75 text-break text-dark d-flex justify-content-center'>
+-              Other Lightning nodes can open payment channels to your node following this Node ID.            
++              {nodeURI ? 'Use this URI to connect to your node. LAN addresses require access to the same network or VPN.' : 'No reachable peer address is configured. Add an address to the Peer interface in StartOS. A node ID alone is not a connection endpoint.'}
+             </p>
++            {uris.length > 1 && <Form.Select aria-label="Peer address" value={nodeURI} onChange={event => setNodeURI(event.target.value)}>
++              {uris.map(uri => <option key={uri} value={uri}>{uri}</option>)}
++            </Form.Select>}
+             <div className='mb-4 text-break text-dark d-flex justify-content-center'>
+             <InputGroup className='mb-3'>
+-              <Form.Control 
++              <Form.Control
+                 onClick={copyHandler}
+-                placeholder={nodeURI}
+-                aria-label={nodeURI}
++                value={nodeURI || nodeInfo.id || ''}
++                aria-label='Node connection address'
+                 aria-describedby="copy-addon"
+                 className="form-control-left"
+                 readOnly
+diff --git a/apps/frontend/src/components/shared/FiatBox/FiatBox.test.tsx b/apps/frontend/src/components/shared/FiatBox/FiatBox.test.tsx
+index 4f18b20..92523dd 100644
+--- a/apps/frontend/src/components/shared/FiatBox/FiatBox.test.tsx
++++ b/apps/frontend/src/components/shared/FiatBox/FiatBox.test.tsx
+@@ -17,4 +17,12 @@ describe('FiatBox component ', () => {
+     await act(async () => jest.advanceTimersByTime(APP_ANIMATION_DURATION * 1000));
+     expect(screen.getByTestId('fiat-box')).toBeInTheDocument();
+   });
++  it('converts sats locally using the XBT rate and marks missing rates unavailable', () => {
++    const store = createMockStore('/', mockAppStore);
++    const {rerender} = render(<Provider store={store}><FiatBox value={100000000} rate={250} /></Provider>);
++    expect(screen.getByTestId('fiat-box')).toHaveTextContent('250');
++    rerender(<Provider store={store}><FiatBox value={100000000} rate={0} /></Provider>);
++    expect(screen.getByTestId('fiat-box')).toHaveTextContent('Fiat unavailable');
++  });
++
+ });
+diff --git a/apps/frontend/src/components/shared/FiatBox/FiatBox.tsx b/apps/frontend/src/components/shared/FiatBox/FiatBox.tsx
+index ad311b4..f3a5356 100755
+--- a/apps/frontend/src/components/shared/FiatBox/FiatBox.tsx
++++ b/apps/frontend/src/components/shared/FiatBox/FiatBox.tsx
+@@ -10,6 +10,9 @@ const FiatBox = props => {
+   const fiatUnit = useSelector(selectFiatUnit);
+   const fiatSymbol = FIAT_CURRENCIES.find((fiat => fiat.currency === fiatUnit))?.symbol;
+ 
++  if (!Number.isFinite(Number(props.rate)) || Number(props.rate) <= 0) {
++    return <span className='fiat-unavailable' data-testid='fiat-box'>Fiat unavailable</span>;
++  }
+   return (
+     <span
+       className={'d-flex align-items-center justify-content-start fiat-box-span ' + props.className}
+diff --git a/apps/frontend/src/components/ui/Header/Header.tsx b/apps/frontend/src/components/ui/Header/Header.tsx
+index ed1d345..fa762d6 100755
+--- a/apps/frontend/src/components/ui/Header/Header.tsx
++++ b/apps/frontend/src/components/ui/Header/Header.tsx
+@@ -60,7 +60,7 @@ const Header = (props) => {
+             </Col>
+             <Col xs={9}>
+               <h4 className="ms-3 m-0 text-dark">
+-                <strong>Core Lightning Node</strong>
++                <strong>XBT Core Lightning Node</strong>
+               </h4>
+               <Row className='header-info-text my-1'>
+                 <Col xs={12} className='d-flex align-items-center text-light'>
+@@ -133,10 +133,10 @@ const Header = (props) => {
+         <Image src={isDarkMode ? '/images/cln-logo-dark.png' : '/images/cln-logo-light.png'} className='header-info-logo me-3 rounded float-start' alt='Core Lightning Logo' />
+         <Row className='header-info-text mt-3'>
+           {(currentScreenSize !== Breakpoints.MD) ?
+-            <h4 className='m-0 text-dark'><strong>Core Lightning Node</strong></h4>
++            <h4 className='m-0 text-dark'><strong>XBT Core Lightning Node</strong></h4>
+             :
+             <Col xs={12} lg={4} className='d-flex align-items-center justify-content-between' data-testid='header-context'>
+-              <h4 className='m-0 text-dark'><strong>Core Lightning Node</strong></h4>
++              <h4 className='m-0 text-dark'><strong>XBT Core Lightning Node</strong></h4>
+               <div className='d-flex align-items-center'>
+                 <Menu />
+                 <Settings onShowConnectWallet={props.onShowConnectWallet} />
+diff --git a/apps/frontend/src/components/ui/Settings/Settings.tsx b/apps/frontend/src/components/ui/Settings/Settings.tsx
+index 4e3acae..c34718a 100755
+--- a/apps/frontend/src/components/ui/Settings/Settings.tsx
++++ b/apps/frontend/src/components/ui/Settings/Settings.tsx
+@@ -55,7 +55,6 @@ const Settings = (props) => {
+             <Dropdown.Item data-bs-toggle='modal' data-bs-target='#staticBackdrop' onClick={() => dispatch(setShowModals({ ...showModals, setPasswordModal: true }))}>Reset Password</Dropdown.Item>
+         }
+         <Dropdown.Divider />
+-        <Dropdown.Item as='div' className='d-flex align-items-center justify-content-between'>Fiat Currency <FiatSelection className='ms-4 fiat-dropdown' /></Dropdown.Item>
+         <Dropdown.Item as='div' className='d-flex align-items-center justify-content-between'>Currency <ToggleSwitch onChange={changeCurrencyUnitHandler} values={CURRENCY_UNITS} selIndex={uiConfigUnit === Units.BTC ? 1 : 0} /></Dropdown.Item>
+       </Dropdown.Menu>
+     </Dropdown>
+diff --git a/apps/frontend/src/services/http.service.ts b/apps/frontend/src/services/http.service.ts
+index 8712c1c..c4b2f54 100644
+--- a/apps/frontend/src/services/http.service.ts
++++ b/apps/frontend/src/services/http.service.ts
+@@ -1,4 +1,5 @@
+ import axios from 'axios';
++import { nodeUris, pendingSplices } from '../utilities/channel-status';
+ import moment from 'moment';
+ import { ApplicationConfiguration, AuthResponse, Peer } from '../types/root.type';
+ import { API_BASE_URL, API_VERSION, APP_WAIT_TIME, PaymentType, TimeGranularity, getTimestampWithGranularity, SATS_MSAT, SCROLL_PAGE_SIZE } from '../utilities/constants';
+@@ -202,9 +203,26 @@ export class RootService {
+     const nodesMap = new Map<string, Peer>(
+       nodes.nodes?.map(node => [node.nodeid, node]) || []
+     );
++    let txRows: any[][] | null = null;
++    let tip: number | null = null;
++    let spliceStatusError: string | null = null;
++    if (peerChannels.channels?.some(channel => channel.state === 'CHANNELD_AWAITING_SPLICE')) {
++      try {
++        const [transactions, info]: [any, any] = await Promise.all([
++          HttpService.clnCall('sql', { query: 'SELECT hash, blockheight FROM transactions' }),
++          HttpService.clnCall('getinfo')
++        ]);
++        if (!Array.isArray(transactions.rows) || !Number.isInteger(info.blockheight)) throw new Error('Invalid confirmation response from node');
++        txRows = transactions.rows;
++        tip = info.blockheight;
++      } catch (error) { spliceStatusError = String(error); }
++    }
+     const merged = peerChannels.channels?.map(channel => ({
+       ...channel,
+-      node_alias: nodesMap.get(channel.peer_id)?.alias ?? ''
++      node_alias: nodesMap.get(channel.peer_id)?.alias ?? '',
++      node_uris: nodeUris(channel.peer_id, nodesMap.get(channel.peer_id)?.addresses),
++      pending_splices: pendingSplices(channel, txRows, tip),
++      splice_status_error: spliceStatusError
+     })) || [];
+     return { channels: merged };
+     // // No pagination, need full data for active, pending and inactive channels calculations
+diff --git a/apps/frontend/src/store/rootSlice.tsx b/apps/frontend/src/store/rootSlice.tsx
+index 1d971e1..cdc4bf4 100644
+--- a/apps/frontend/src/store/rootSlice.tsx
++++ b/apps/frontend/src/store/rootSlice.tsx
+@@ -121,6 +121,13 @@ const rootSlice = createSlice({
+       const aggr = aggregatePeerChannels(listChannels);
+       state.listChannels = { ...aggr, isLoading: false };
+     },
++    setChannelLabel(state, action: PayloadAction<{channel_id: string; label: string}>) {
++      for (const key of ['mergedChannels', 'activeChannels', 'pendingChannels', 'inactiveChannels'] as const) {
++        for (const channel of state.listChannels[key]) {
++          if (channel.channel_id === action.payload.channel_id) channel.channel_label = action.payload.label;
++        }
++      }
++    },
+     clearRootStore(state) {
+       return { ...defaultRootState, appConfig: state.appConfig };
+     },
+@@ -138,6 +145,7 @@ export const {
+   setNodeInfo,
+   setListFunds,
+   setListChannels,
++  setChannelLabel,
+   clearRootStore,
+ } = rootSlice.actions;
+ 
+diff --git a/apps/frontend/src/types/root.type.ts b/apps/frontend/src/types/root.type.ts
+index 968cc30..e2153ca 100755
+--- a/apps/frontend/src/types/root.type.ts
++++ b/apps/frontend/src/types/root.type.ts
+@@ -38,6 +38,7 @@ export type NodeInfo = {
+   num_inactive_channels?: number;
+   address?: Address[];
+   binding?: Address[];
++  peer_addresses?: Address[];
+   version?: string;
+   blockheight?: number;
+   network?: string;
+@@ -176,7 +177,11 @@ export type ChannelType = {
+ };
+ 
+ export type PeerChannel = {
++  node_uris?: string[];
++  pending_splices?: { txid: string; delta: number; capacity: number; confirmations: number | null }[];
++  splice_status_error?: string | null;
+   node_alias: string;
++  channel_label?: string;
+   peer_id: string;
+   channel_id: string;
+   short_channel_id?: string;
+diff --git a/apps/frontend/src/utilities/channel-status.test.ts b/apps/frontend/src/utilities/channel-status.test.ts
+new file mode 100644
+index 0000000..9960406
+--- /dev/null
++++ b/apps/frontend/src/utilities/channel-status.test.ts
+@@ -0,0 +1,31 @@
++import { nodeUris, pendingSplices } from './channel-status';
++
++const id = '02' + 'a'.repeat(64);
++test('only advertised listening endpoints become node URIs, including IPv6 and Tor', () => {
++  expect(nodeUris(id, [
++    {type:'ipv4',address:'192.168.8.102',port:9735},
++    {type:'ipv6',address:'2001:db8::1',port:9735},
++    {type:'torv3',address:'a'.repeat(56)+'.onion',port:9735},
++    {type:'ipv4',address:'127.0.0.1',port:0},
++    {type:'ipv4',address:'0.0.0.0',port:9735},
++    {type:'ipv6',address:'::',port:9735},
++    {type:'ipv4',address:'127.0.0.1',port:9735},
++    {type:'websocket',address:'unknown',port:9735},
++  ])).toEqual([id+'@192.168.8.102:9735',id+'@[2001:db8::1]:9735',id+'@'+'a'.repeat(56)+'.onion:9735']);
++  expect(nodeUris(id)).toEqual([]);
++  expect(nodeUris('invalid', [{type:'ipv4',address:'127.0.0.1',port:9735}])).toEqual([]);
++});
++const channel = {state:'CHANNELD_AWAITING_SPLICE',total_msat:9999834000,inflight:[{funding_txid:'tx',total_funding_msat:10999834000}]};
++test('pending amount and confirmations come from node state without browser history', () => {
++  expect(pendingSplices(channel,[['tx',0]],100)[0]).toEqual({txid:'tx',delta:1000000,capacity:10999834,confirmations:0});
++  expect(pendingSplices(channel,[['tx',98]],100)[0].confirmations).toBe(3);
++  expect(pendingSplices(channel,null,null)[0].confirmations).toBeNull();
++  expect(pendingSplices(channel,[],100)[0].confirmations).toBeNull();
++  expect(pendingSplices({...channel,state:'CHANNELD_NORMAL'},[['tx',98]],100)).toEqual([]);
++  expect(pendingSplices({...channel,total_msat:11999834000},[['tx',98]],100)[0].delta).toBe(-1000000);
++});
++
++test('node connection URIs preserve StartOS external port and never use a wildcard', () => {
++  expect(nodeUris(id, [{type:'ipv4',address:'192.168.8.102',port:64774}])).toEqual([id+'@192.168.8.102:64774']);
++  expect(nodeUris(id, [{type:'ipv4',address:'0.0.0.0',port:9735}])).toEqual([]);
++});
+diff --git a/apps/frontend/src/utilities/channel-status.ts b/apps/frontend/src/utilities/channel-status.ts
+new file mode 100644
+index 0000000..949b705
+--- /dev/null
++++ b/apps/frontend/src/utilities/channel-status.ts
+@@ -0,0 +1,35 @@
++import { Address } from '../types/root.type';
++
++export function nodeUris(id: string, addresses: Address[] = []): string[] {
++  if (!/^(02|03)[0-9a-f]{64}$/i.test(id)) return [];
++  return [...new Set(addresses.filter(a =>
++    ['ipv4', 'ipv6', 'torv3', 'dns'].includes(a.type || '') &&
++    typeof a.address === 'string' &&
++    !['0.0.0.0', '::', '[::]', '::1', '[::1]', 'localhost'].includes(a.address.toLowerCase()) &&
++    !a.address.startsWith('127.') && /^[a-z0-9.:[\]-]+$/i.test(a.address) &&
++    Number.isInteger(a.port) && a.port! > 0 && a.port! <= 65535
++  ).map(a => {
++    const host = a.address!.includes(':') && !a.address!.startsWith('[') ? '[' + a.address + ']' : a.address;
++    return id + '@' + host + ':' + a.port;
++  }))];
++}
++
++export function pendingSplices(channel: any, rows: any[][] | null, tip: number | null) {
++  if (channel.state !== 'CHANNELD_AWAITING_SPLICE') return [];
++  return (channel.inflight || []).map((f: any) => {
++    const row = rows?.find(row => row[0] === f.funding_txid);
++    const height = row ? Number(row[1]) : null;
++    const confirmations = height !== null && tip !== null ? (height > 0 ? Math.max(0, tip - height + 1) : 0) : null;
++    const capacity = Number(f.total_funding_msat) / 1000;
++    return { txid: f.funding_txid, delta: capacity - Number(channel.total_msat) / 1000, capacity, confirmations };
++  });
++}
++
++// Balances are sats, while ProgressBar expects a percentage. Normalize before
++// rendering so large channels and one-sided balances use the same scale.
++export const localLiquidityPercent = (local: number, remote: number): number => {
++  const safeLocal = Number.isFinite(local) ? Math.max(0, local) : 0;
++  const safeRemote = Number.isFinite(remote) ? Math.max(0, remote) : 0;
++  const total = safeLocal + safeRemote;
++  return total > 0 ? safeLocal / total * 100 : 0;
++};
+diff --git a/apps/frontend/src/utilities/constants.ts b/apps/frontend/src/utilities/constants.ts
+index 3517756..f0ca1d4 100755
+--- a/apps/frontend/src/utilities/constants.ts
++++ b/apps/frontend/src/utilities/constants.ts
+@@ -48,7 +48,7 @@ export enum NumberTypes {
+ export enum Units {
+   MSATS = 'MSATS',
+   SATS = 'SATS',
+-  BTC = 'BTC',
++  BTC = 'XBT',
+ }
+ 
+ export enum ApplicationModes {

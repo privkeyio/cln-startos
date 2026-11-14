@@ -25,6 +25,12 @@
 
 ## Using Core Lightning
 
+### Channels and fiat display
+
+Open a payment channel in the Web UI to label it or review a splice. Labels are private records stored on your node. A splice adds on-chain funds or withdraws channel funds without closing the channel; both peers must support it. Review the amount and confirm before submission. If the reply is lost, refresh the existing splice status instead of submitting again. Pending splices show confirmation progress.
+
+Fiat amounts use Neoxa's XBT/USDC market price, treating USDC as a USD estimate, with Frankfurter exchange rates for other supported currencies. Your balances and payment amounts are not sent to these providers. If a valid price is unavailable, the UI says so.
+
 ### Interfaces
 
 - **Web UI** — the CLN Application web dashboard for day-to-day node operation.
