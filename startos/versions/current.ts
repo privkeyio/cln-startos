@@ -1,17 +1,31 @@
 import { IMPOSSIBLE, T, VersionInfo } from '@start9labs/start-sdk'
+import { rm } from 'fs/promises'
 import { removeDroppedPlugins } from '../fileModels/config'
+import { sdk } from '../sdk'
 
 //CLBOSS and the watchtower client are no longer shipped, so a config that loaded either
 //names a binary that is not there and lightningd exits at startup. Every edge into this
 //version runs this. Versions before #blake:26.6.10:0 reach this one through it, so they also
 //run its invoice rune removal.
-const removePlugins = ({ effects }: { effects: T.Effects }) =>
-  removeDroppedPlugins(effects)
+//The RPC socket now lives on the public volume, so the one an earlier version left in main is
+//removed.
+const removePluginsAndOldSocket = async ({
+  effects,
+}: {
+  effects: T.Effects
+}) => {
+  await removeDroppedPlugins(effects)
+  await rm(sdk.volumes.main.subpath('./bitcoin/lightning-rpc'), { force: true })
+}
 
 export const current = VersionInfo.of({
   version: '#blake:26.6.10:1',
   releaseNotes: {
-    en_US: `Requires StartOS 0.4.1 or later. Fixes memory use growing while the service runs. The node is still Core Lightning v26.06.10-blake2b.1.
+    en_US: `Requires StartOS 0.4.1 or later. The node is still Core Lightning v26.06.10-blake2b.1.
+
+- Fixes memory use growing while the service runs.
+- Services that depend on Core Lightning now connect through a separate volume, either with a rune limited to invoices and payments or with full control of the node through its RPC socket, gRPC or admin rune. Services that use the RPC socket need their own update to keep connecting.
+- Peers can now connect to your node over its IPv6 addresses.
 
 If you are updating from a version before \`#blake:26.6.10:0\`, this update also brings:
 
@@ -36,7 +50,7 @@ The watchtower and CLBOSS stay removed, since neither can follow BLAKE2b yet.
 - Channels opened with \`v26.06.7-blake2b.1\` to \`.3\` do not use unified signatures. Close them and open new ones.`,
   },
   migrations: {
-    up: removePlugins,
+    up: removePluginsAndOldSocket,
     //Refuse every downgrade. Channels opened here negotiate unified signing, and a build without it
     //computes a different signature hash, so it cannot close them. lightning-downgrade refuses for
     //the same reason.

@@ -10,7 +10,7 @@ export const manifest = setupManifest({
   marketingUrl: 'https://github.com/privkeyio/lightning',
   donationUrl: null,
   description: { short, long },
-  volumes: ['main'],
+  volumes: ['main', 'public'],
   virtualNetworking: true,
   images: {
     lightning: {

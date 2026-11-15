@@ -6,6 +6,7 @@ import {
   clnrestPort,
   grpcPort,
   peerPort,
+  rpcFile,
   websocketPort,
   wsPort,
 } from '../utils'
@@ -78,11 +79,12 @@ export const shape = z.looseObject({
   'bitcoin-datadir': z.literal(bitcoinDataDir).catch(bitcoinDataDir),
   'bind-addr': z
     .union([z.array(z.string()), z.string().transform((s) => [s])])
-    .catch([`0.0.0.0:${peerPort}`, `ws::${wsPort}`]),
+    .catch([`:${peerPort}`, `ws::${wsPort}`]),
   'bitcoin-rpcuser': z.undefined().catch(undefined),
   'bitcoin-rpcpassword': z.undefined().catch(undefined),
   'grpc-port': z.literal(grpcPort).catch(grpcPort),
   'grpc-host': z.literal('[::]').catch('[::]'),
+  'rpc-file': z.literal(rpcFile).catch(rpcFile),
 
   // Dynamic (set at runtime)
   'announce-addr': iniStringArray,
@@ -432,6 +434,7 @@ function formToFile(
     'bitcoin-rpcpassword': undefined,
     'grpc-port': grpcPort,
     'grpc-host': '[::]',
+    'rpc-file': rpcFile,
 
     // Node identity
     alias: alias || undefined,
@@ -441,7 +444,7 @@ function formToFile(
     'always-use-proxy':
       torOnly == null ? undefined : torOnly ? 'true' : 'false',
     'bind-addr': [
-      `0.0.0.0:${peerPort}`,
+      `:${peerPort}`,
       `ws::${wsPort}`,
       ...(clamsRemote ? [`ws::${websocketPort}`] : []),
     ],
