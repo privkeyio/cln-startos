@@ -159,7 +159,7 @@ Thirteen actions. Three configure the node, two handle payments, one is hidden a
 Three actions writing `/config`, grouped together. Each writes only the fields it presents, costs seconds plus a restart, and is safe to re-run — the forms are pre-filled from the current file.
 
 - **General Settings** carries node identity, fee policy, channel minimums, Tor Only, the custom external host, the Clams toggle, and `bitcoin-retry-timeout` — how long `plugin-bcli` retries a failing `bitcoin-cli` call before `lightningd` exits with `The Bitcoin backend died` (upstream default 60 seconds, which also raises the RPC client timeout to match). Two combinations produce a visible consequence rather than an error: Tor Only with a custom external host drops the host and raises a health check, and the Clams toggle changes the bind addresses.
-- **Plugins** toggles CLNrest and selects whether the built-in Sling plugin loads.
+- **Plugins** toggles CLNrest, selects whether the built-in Sling plugin loads, and enables CLBOSS with its settings (minimum on-chain, auto close, zero base fee, channel size limits, and the most a swap may cost). While CLBOSS is enabled, the CLBOSS Status, Ignore On-chain Funds, Resume On-chain Management and Unmanage Peer actions are available.
 - **Experimental Features** exposes upstream's experimental flags, which are not standardized across implementations and may break between releases. Its dual-funding amounts are written to the `funder-*` options as bare numbers, which the funder plugin reads as satoshis; the lease's `channel-fee-max-base-msat` is the one amount in millisatoshis.
 
 ### Create Rune, Revoke All Runes
@@ -286,7 +286,8 @@ Four consequences worth knowing:
 3. **CLNrest is served as plaintext by the node**, with TLS added at the edge for LAN and clearnet only.
 4. **gRPC cannot be reached through a StartOS TLS listener**, terminating or passthrough, because the plugin authenticates clients with their own certificates and its own certificate names only `cln` and `localhost`.
 5. **A custom external host is incompatible with Tor Only** and is dropped while both are set.
-6. **No watchtower or CLBOSS.** The Eye of Satoshi's tower cannot read BLAKE2b block headers, and CLBOSS buys inbound liquidity through a submarine swap service that has not adopted BLAKE2b, so neither is shipped. Settings an earlier version wrote for either are removed on update.
+6. **No watchtower.** The Eye of Satoshi's tower cannot read BLAKE2b block headers, so it is not shipped. Settings an earlier version wrote for it are removed on update.
+   **CLBOSS is the BLAKE2b build.** The `clboss/` submodule is [chrisguida/clboss](https://github.com/chrisguida/clboss), an unofficial build of CLBOSS 0.17.3 that reads the 164-byte block header and, on a node that advertises `option_blake2b`, buys inbound liquidity through swap services on the BLAKE2b chain (`plebswap.com`, `lightningfork.com`). It is off unless the operator enables it in Plugins, and it moves funds on its own once enabled.
 7. **Plugins are those built into the image.** Adding another means changing the image, not dropping a file on the volume.
 8. **No riscv64 build**, and on hardware without a native image the aarch64 build runs emulated.
 9. **An `hsm_secret` protected by a passphrase cannot be used.** `hsm-passphrase` (formerly `encrypted-hsm`) prompts on a terminal at startup, which the service does not have. A legacy encrypted secret must be decrypted with `lightning-hsmtool decrypt` before it is copied in.

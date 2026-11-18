@@ -50,14 +50,10 @@ For each independent upstream source below: a link to its canonical repo, one co
 
 ### CLBOSS
 
-- Upstream: [ZmnSCPxj/clboss](https://github.com/ZmnSCPxj/clboss).
-- Latest release tag:
+- Upstream: [chrisguida/clboss](https://github.com/chrisguida/clboss), the build that follows BLAKE2b, on top of [ksedgwic/clboss](https://github.com/ksedgwic/clboss). Its `vX.Y.Z-blake2b.N` tags are source-only; there are no GitHub releases.
+- Latest tag:
   ```sh
-  gh release view -R ZmnSCPxj/clboss --json tagName -q .tagName
-  ```
-- If no GitHub release is published for the bump, fall back to tags:
-  ```sh
-  gh api repos/ZmnSCPxj/clboss/tags --jq '.[0].name'
+  gh api repos/chrisguida/clboss/tags --jq '.[0].name'
   ```
 - Current pin: commit checked out in the `clboss/` git submodule. Inspect with `git -C clboss describe --tags --always`.
 

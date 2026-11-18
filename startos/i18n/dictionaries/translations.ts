@@ -338,6 +338,8 @@ export default {
     351: 'Las restricciones deben ser un array JSON de arrays de cadenas, con al menos una cadena en cada uno, como [["method=getinfo"]].',
     352: 'Se creó una runa de solo lectura.',
     353: 'Se creó una runa limitada a las restricciones que introdujo.',
+    354: 'Comisión máxima de intercambio',
+    355: 'Lo máximo que puede costar un intercambio, en partes por millón del importe intercambiado, contando el porcentaje del servicio de intercambio y sus comisiones de minería. CLBOSS omite un servicio que cotice más. 10000 es el 1%.',
   },
   de_DE: {
     0: 'Core Lightning wird gestartet!',
@@ -676,6 +678,8 @@ export default {
     351: 'Die Einschränkungen müssen ein JSON-Array aus Arrays von Zeichenketten sein, mit mindestens einer Zeichenkette in jedem, etwa [["method=getinfo"]].',
     352: 'Eine Rune mit Nur-Lese-Zugriff wurde erstellt.',
     353: 'Eine Rune wurde erstellt, die auf die von Ihnen eingegebenen Einschränkungen begrenzt ist.',
+    354: 'Maximale Swap-Gebühr',
+    355: 'Der Höchstbetrag, den ein Swap kosten darf, in Millionsteln des getauschten Betrags, einschließlich des Prozentsatzes des Swap-Dienstes und seiner Mining-Gebühren. CLBOSS übergeht einen Dienst, der mehr verlangt. 10000 entspricht 1%.',
   },
   pl_PL: {
     0: 'Uruchamianie Core Lightning!',
@@ -1014,6 +1018,8 @@ export default {
     351: 'Ograniczenia muszą być tablicą JSON tablic ciągów znaków, z co najmniej jednym ciągiem w każdej, na przykład [["method=getinfo"]].',
     352: 'Utworzono runę tylko do odczytu.',
     353: 'Utworzono runę ograniczoną do wprowadzonych przez ciebie ograniczeń.',
+    354: 'Maksymalna opłata za swap',
+    355: 'Najwyższy koszt swapu, w częściach na milion wymienianej kwoty, wliczając procent pobierany przez usługę swapu i jej opłaty za wydobycie. CLBOSS pomija usługę, która podaje wyższą cenę. 10000 to 1%.',
   },
   fr_FR: {
     0: 'Démarrage de Core Lightning !',
@@ -1352,5 +1358,7 @@ export default {
     351: 'Les restrictions doivent être un tableau JSON de tableaux de chaînes, avec au moins une chaîne dans chacun, par exemple [["method=getinfo"]].',
     352: 'Une rune en lecture seule a été créée.',
     353: 'Une rune limitée aux restrictions que vous avez saisies a été créée.',
+    354: 'Frais de swap maximum',
+    355: "Le coût maximal d'un swap, en parties par million du montant échangé, en comptant le pourcentage du service de swap et ses frais de minage. CLBOSS ignore un service qui demande davantage. 10000 correspond à 1%.",
   },
 } satisfies Record<string, LangDict>

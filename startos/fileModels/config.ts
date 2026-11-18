@@ -132,23 +132,15 @@ export const shape = z.looseObject({
   'clboss-zerobasefee': iniEnum([...clbossZerobasefees]),
   'clboss-min-channel': iniNumber,
   'clboss-max-channel': iniNumber,
+  // Parts per million of the amount swapped; unset is no limit
+  'clboss-swap-max-fee-ppm': iniNumber,
 })
 
-export const clbossPlugin = '/usr/local/libexec/c-lightning/plugins/clboss'
-
-// CLBOSS buys inbound liquidity through a submarine swap service that has not
-// adopted BLAKE2b, and The Eye of Satoshi's tower cannot read BLAKE2b block
-// headers, so neither binary is shipped. Strip them from configs that enabled
-// them, otherwise lightningd exits on a plugin it cannot find.
+// The Eye of Satoshi's tower cannot read BLAKE2b block headers, so its
+// watchtower-client plugin is not shipped. Strip it from configs that enabled
+// it, otherwise lightningd exits on a plugin it cannot find.
 export const dropRemovedPlugins = (plugins: string[]) => ({
-  plugin: plugins.filter(
-    (p) => p !== clbossPlugin && p.split('/').pop() !== 'watchtower-client',
-  ),
-  'clboss-min-onchain': undefined,
-  'clboss-auto-close': undefined,
-  'clboss-zerobasefee': undefined,
-  'clboss-min-channel': undefined,
-  'clboss-max-channel': undefined,
+  plugin: plugins.filter((p) => p.split('/').pop() !== 'watchtower-client'),
   // The Splicing toggle is gone, and lightningd drops the option in v27.04.
   'experimental-splicing': undefined,
 })

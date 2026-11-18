@@ -3,7 +3,7 @@ import { rm } from 'fs/promises'
 import { removeDroppedPlugins } from '../fileModels/config'
 import { sdk } from '../sdk'
 
-//CLBOSS and the watchtower client are no longer shipped, so a config that loaded either
+//The watchtower client is no longer shipped, so a config that loaded it
 //names a binary that is not there and lightningd exits at startup. Every edge into this
 //version runs this. Versions before #blake:26.6.10:0 reach this one through it, so they also
 //run its invoice rune removal.
