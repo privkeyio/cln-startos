@@ -1,23 +1,26 @@
 import { copyFile } from 'fs/promises'
 import { rescanBlockchain } from './actions/rescanBlockchain'
-import { lightningNetwork } from './fileModels/config'
+import { lightningNetwork, networks } from './fileModels/config'
 import { storeJson } from './fileModels/store.json'
 import { i18n } from './i18n'
 import { sdk } from './sdk'
 
 export const { createBackup, restoreInit } = sdk.setupBackups(
   async ({ effects }) => {
-    const network = await lightningNetwork()
+    // Every network's database is left out, not only the one in use: a node
+    // switched between networks must never back up (and later restore) the
+    // other network's stale channel state.
+    const exclude = networks.flatMap((n) => [
+      `${n}/lightning-rpc`,
+      `${n}/lightningd.sqlite3`,
+      `${n}/lightningd.sqlite3-wal`,
+      `${n}/lightningd.sqlite3-shm`,
+      `${n}/gossip_store`,
+    ])
 
     return sdk.Backups.ofVolumes('main')
       .setOptions({
-        exclude: [
-          `${network}/lightningd.sqlite3`,
-          `${network}/lightningd.sqlite3-wal`,
-          `${network}/lightningd.sqlite3-shm`,
-          `${network}/gossip_store`,
-          'data/app/application-cln.log',
-        ],
+        exclude: [...exclude, 'data/app/application-cln.log'],
       })
       .setPostRestore(async (effects) => {
         // CLN's chanbackup plugin keeps emergency.recover describing the
