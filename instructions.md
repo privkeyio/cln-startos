@@ -93,6 +93,10 @@ You can bring a Core Lightning node from another machine, keeping its node ID an
 
 The old node must run the same Core Lightning version as this service or an older one; its database is upgraded automatically on first start, but it cannot be downgraded. If your `hsm_secret` is encrypted, decrypt it on the old machine with `lightning-hsmtool decrypt` before copying it — this service cannot ask for its password at startup.
 
+### Arriving from the recovery package
+
+If your node followed the SHA256d chain past the split, the separate recovery package moves it to BLAKE2b. Once its Recovery: Finish action has run, install this package over it. Before that, the install is refused and nothing changes.
+
 ## Limitations
 
 - **Mainnet only.** Testnet, signet, and regtest are not exposed.
