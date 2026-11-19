@@ -55,6 +55,7 @@ export const main = sdk.setupMain(async ({ effects }) => {
 
   // watch cln config for changes
   const conf = await clnConfig.read().const(effects)
+  const network = conf?.raw?.network ?? 'bitcoin'
 
   // bitcoind's RPC over the bridge, for the sync-progress bitcoin-cli below.
   const bitcoind = await bitcoindRpcBridge(effects)
@@ -295,7 +296,7 @@ export const main = sdk.setupMain(async ({ effects }) => {
           for (const file of grpcCertFiles) {
             while (
               !(await access(
-                sdk.volumes.main.subpath(`./bitcoin/${file}`),
+                sdk.volumes.main.subpath(`./${network}/${file}`),
               ).then(
                 () => true,
                 () => false,
@@ -310,7 +311,7 @@ export const main = sdk.setupMain(async ({ effects }) => {
               sdk.volumes.public.subpath(`./grpc/${file}`),
               (tmp) =>
                 copyFile(
-                  sdk.volumes.main.subpath(`./bitcoin/${file}`),
+                  sdk.volumes.main.subpath(`./${network}/${file}`),
                   tmp,
                   constants.COPYFILE_EXCL,
                 ),
@@ -333,7 +334,7 @@ export const main = sdk.setupMain(async ({ effects }) => {
       exec: {
         command: ['node', '/app/apps/backend/dist/server.js'],
         env: {
-          BITCOIN_NETWORK: 'bitcoin',
+          BITCOIN_NETWORK: network,
           LIGHTNING_DATA_DIR: rootDir,
           APP_PROTOCOL: 'https',
           APP_HOST: '0.0.0.0',

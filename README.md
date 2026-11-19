@@ -279,6 +279,18 @@ Four consequences worth knowing:
 - **Fund channels only from coins received past activation.** A channel funded from a pre-activation UTXO has a funding transaction valid under both rule sets, which reopens the exposure unified signing exists to close.
 - **Downgrading is refused.** A build without unified signing computes a different signature hash and could not close the channels this one opens, so the package declares the downgrade impossible rather than letting you strand a channel.
 
+### Running on regtest (development)
+
+The package runs on mainnet and no action offers anything else. For development and tests it also follows a regtest Bitcoin service, when the config file says so. With the service stopped, add these lines to `config` on the `main` volume:
+
+```
+network=regtest
+dev-blake2b-activation-height=<height>
+developer
+```
+
+`dev-blake2b-activation-height` must match the Bitcoin service's test activation height, and lightningd accepts it only with `developer`. The three lines survive every action that rewrites the file. The node then keeps its wallet, database and gossip store under `regtest/` instead of `bitcoin/`, and Display Seed, Delete Gossip Store and backups follow. Remove the lines to return to the mainnet node, whose data is untouched.
+
 ## Limitations and Differences
 
 1. **A restore is a recovery, not a resumption.** Channels are force-closed by design; plan to sweep the funds and reinstall.

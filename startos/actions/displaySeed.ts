@@ -1,3 +1,4 @@
+import { lightningNetwork } from '../fileModels/config'
 import { i18n } from '../i18n'
 import { sdk } from '../sdk'
 import { FileHelper } from '@start9labs/start-sdk'
@@ -25,7 +26,7 @@ export const displaySeed = sdk.Action.withoutInput(
   // metadata
   async ({ effects }) => {
     const hsmSecretContents = await FileHelper.string(
-      '/media/startos/volumes/main/bitcoin/hsm_secret',
+      `/media/startos/volumes/main/${await lightningNetwork(effects)}/hsm_secret`,
     )
       .read()
       .const(effects)
@@ -54,7 +55,7 @@ export const displaySeed = sdk.Action.withoutInput(
   // the execution function
   async ({ effects }) => {
     const hsmSecretContents = await FileHelper.string(
-      '/media/startos/volumes/main/bitcoin/hsm_secret',
+      `/media/startos/volumes/main/${await lightningNetwork()}/hsm_secret`,
     )
       .read()
       .once()

@@ -1,20 +1,26 @@
 import { copyFile } from 'fs/promises'
 import { rescanBlockchain } from './actions/rescanBlockchain'
+import { lightningNetwork, networks } from './fileModels/config'
 import { storeJson } from './fileModels/store.json'
 import { i18n } from './i18n'
 import { sdk } from './sdk'
 
 export const { createBackup, restoreInit } = sdk.setupBackups(
-  async ({ effects }) =>
-    sdk.Backups.ofVolumes('main')
+  async ({ effects }) => {
+    // Every network's database is left out, not only the one in use: a node
+    // switched between networks must never back up (and later restore) the
+    // other network's stale channel state.
+    const exclude = networks.flatMap((n) => [
+      `${n}/lightning-rpc`,
+      `${n}/lightningd.sqlite3`,
+      `${n}/lightningd.sqlite3-wal`,
+      `${n}/lightningd.sqlite3-shm`,
+      `${n}/gossip_store`,
+    ])
+
+    return sdk.Backups.ofVolumes('main')
       .setOptions({
-        exclude: [
-          'bitcoin/lightningd.sqlite3',
-          'bitcoin/lightningd.sqlite3-wal',
-          'bitcoin/lightningd.sqlite3-shm',
-          'bitcoin/gossip_store',
-          'data/app/application-cln.log',
-        ],
+        exclude: [...exclude, 'data/app/application-cln.log'],
       })
       .setPostRestore(async (effects) => {
         // CLN's chanbackup plugin keeps emergency.recover describing the
@@ -23,7 +29,7 @@ export const { createBackup, restoreInit } = sdk.setupBackups(
         // Snapshot the restored copy first: it is the last file that can
         // rebuild recovery stubs for the pre-backup channels (lightning-cli
         // emergencyrecover / recoverchannel), and this copy is never touched.
-        const scb = '/media/startos/volumes/main/bitcoin/emergency.recover'
+        const scb = `/media/startos/volumes/main/${await lightningNetwork()}/emergency.recover`
         await copyFile(
           scb,
           `${scb}.restored-${new Date().toISOString().slice(0, 10)}`,
@@ -39,5 +45,6 @@ export const { createBackup, restoreInit } = sdk.setupBackups(
             'After restoring from backup, your on-chain balance reads zero until the blockchain is rescanned. Run this action with a blockheight from before your node was first created, prefixed with a hyphen (for example -800000). The rescan takes hours; the Synced health check stays red while it works — leave Core Lightning and Bitcoin running until it turns green.',
           ),
         })
-      }),
+      })
+  },
 )

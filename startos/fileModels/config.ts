@@ -62,6 +62,8 @@ const iniEnum = <const T extends [string, ...string[]]>(values: T) =>
     .optional()
     .catch(undefined)
 
+export const networks = ['bitcoin', 'regtest'] as const
+
 export const funderPolicies = ['match', 'available', 'fixed'] as const
 export const clbossZerobasefees = [
   'default',
@@ -72,7 +74,12 @@ export const clbossZerobasefees = [
 
 export const shape = z.looseObject({
   // Enforced by StartOS
-  network: z.literal('bitcoin').catch('bitcoin'),
+  // Mainnet, unless the config file itself says regtest. No action offers
+  // regtest: a developer writes `network=regtest` into the file, with
+  // `developer` and `dev-blake2b-activation-height=<height>` beside it when
+  // the test chain activates BLAKE2b somewhere other than the default. Those
+  // two pass through untouched, like every key this model does not name.
+  network: z.enum(networks).catch('bitcoin'),
   'bitcoin-rpcconnect': iniString,
   'bitcoin-rpcport': iniNumber,
   'bitcoin-retry-timeout': iniNumber,
@@ -423,7 +430,7 @@ function formToFile(
     'announce-addr': raw?.['announce-addr']?.filter((a): a is string => !!a),
 
     // Enforced
-    network: 'bitcoin' as const,
+    network: raw?.network === 'regtest' ? 'regtest' : 'bitcoin',
     // bitcoin-rpcconnect / bitcoin-rpcport come from `raw` (set to bitcoind's
     // bridge address by watchHosts), preserved across config-action writes;
     // absent until bitcoind's binding resolves.
@@ -482,6 +489,18 @@ export const clnConfig = FileHelper.raw<FormData>(
   },
   (data) => fullConfigSpec.partialValidator.parse(data),
 )
+
+/**
+ * The network lightningd runs on, which is also the name of the subdirectory
+ * of the lightning directory that holds its wallet, database and gossip store.
+ * Pass `effects` to subscribe reactively; omit it for a one-shot read.
+ */
+export const lightningNetwork = async (effects?: T.Effects) => {
+  const network = clnConfig.read((c) => c.raw?.network)
+  return (
+    (await (effects ? network.const(effects) : network.once())) ?? 'bitcoin'
+  )
+}
 
 // Every init and every update edge runs this, so a restored or updated config
 // never names a plugin that is no longer shipped.
