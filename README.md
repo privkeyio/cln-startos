@@ -279,6 +279,12 @@ Four consequences worth knowing:
 - **Fund channels only from coins received past activation.** A channel funded from a pre-activation UTXO has a funding transaction valid under both rule sets, which reopens the exposure unified signing exists to close.
 - **Downgrading is refused.** A build without unified signing computes a different signature hash and could not close the channels this one opens, so the package declares the downgrade impossible rather than letting you strand a channel.
 
+### Arriving from the recovery package
+
+A node that followed the SHA256d chain past the split is moved to BLAKE2b by a separate package, the `#recovery` flavor ([chrisguida/cln-startos](https://github.com/chrisguida/cln-startos)). Its last action, Recovery: Finish, leaves the volume in this package's layout, running this same Core Lightning version, with the SHA256d data archived under `recovery/sha256d`. This package can then be installed over it (`#recovery:26.6.10:0` or later): the node keeps its identity, wallet and settings, and nothing here reads or removes the `recovery` directory.
+
+The install is refused, and the recovery package stays installed and unchanged, when the recovery is not finished, when the node's Bitcoin Backend is still the SHA256d service, or when the node runs on a test network. The message names which.
+
 ## Limitations and Differences
 
 1. **A restore is a recovery, not a resumption.** Channels are force-closed by design; plan to sweep the funds and reinstall.

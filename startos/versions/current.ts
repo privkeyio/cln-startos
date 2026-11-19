@@ -1,5 +1,5 @@
 import { IMPOSSIBLE, T, VersionInfo } from '@start9labs/start-sdk'
-import { rm } from 'fs/promises'
+import { access, readFile, rm } from 'fs/promises'
 import { removeDroppedPlugins } from '../fileModels/config'
 import { sdk } from '../sdk'
 
@@ -18,6 +18,61 @@ const removePluginsAndOldSocket = async ({
   await rm(sdk.volumes.main.subpath('./bitcoin/lightning-rpc'), { force: true })
 }
 
+const exists = (path: string) =>
+  access(path).then(
+    () => true,
+    () => false,
+  )
+
+//Arriving from the recovery package (github.com/chrisguida/cln-startos, flavor `recovery`), which
+//moves a node that followed the SHA256d chain past the split over to BLAKE2b. Its last action,
+//Recovery: Finish, leaves the volume in this package's layout: the BLAKE2b node's data in place,
+//this same lightningd version, and the SHA256d data archived under recovery/sha256d, which
+//nothing here reads. So the only work is to refuse a recovery that is not finished. Until Finish,
+//the node's own data belongs to the SHA256d chain and starting this build on it would rescan the
+//wrong chain's channels. StartOS keeps the recovery package installed when this throws.
+const arriveFromRecovery = async ({ effects }: { effects: T.Effects }) => {
+  const main = (path: string) => sdk.volumes.main.subpath(path)
+  //The recovery package's fields are not in this package's store model: read the file as it is.
+  const store: Record<string, unknown> = await readFile(
+    main('./store.json'),
+    'utf-8',
+  ).then(
+    (s) => JSON.parse(s),
+    () => ({}),
+  )
+  const config = await readFile(main('./config'), 'utf-8').catch(() => '')
+
+  if (
+    store.recovery ||
+    store.blake2b ||
+    store.finish ||
+    (await exists(main('./recovery/blake2b')))
+  ) {
+    throw new Error(
+      'This node is in the middle of a chain recovery. Go back to the recovery package, run Recovery: Status, and install this package only after Recovery: Finish.',
+    )
+  }
+  if (store.bitcoinBackend === 'knots-prerdts') {
+    throw new Error(
+      'This node follows the SHA256d chain (Bitcoin Backend is Knots pre-RDTS). This package runs on the BLAKE2b chain only.',
+    )
+  }
+  if (/^network\s*=\s*(?!bitcoin\s*$)/m.test(config)) {
+    throw new Error(
+      'This node runs on a test network. This package runs on mainnet only.',
+    )
+  }
+
+  //Finish asks the recovery package to drop the gossip gathered on the SHA256d chain at its next
+  //start. If that start never happened, drop it here.
+  if (store.wipeGossip) {
+    await rm(main('./bitcoin/gossip_store'), { force: true })
+  }
+
+  await removePluginsAndOldSocket({ effects })
+}
+
 export const current = VersionInfo.of({
   version: '#blake:26.6.10:1',
   releaseNotes: {
@@ -26,6 +81,7 @@ export const current = VersionInfo.of({
 - Fixes memory use growing while the service runs.
 - Services that depend on Core Lightning now connect through a separate volume, either with a rune limited to invoices and payments or with full control of the node through its RPC socket, gRPC or admin rune. Services that use the RPC socket need their own update to keep connecting.
 - Peers can now connect to your node over its IPv6 addresses.
+- Can be installed over the recovery package (the \`#recovery\` flavor) once its Recovery: Finish action has run.
 
 If you are updating from a version before \`#blake:26.6.10:0\`, this update also brings:
 
@@ -55,5 +111,10 @@ The watchtower and CLBOSS stay removed, since neither can follow BLAKE2b yet.
     //computes a different signature hash, so it cannot close them. lightning-downgrade refuses for
     //the same reason.
     down: IMPOSSIBLE,
+    other: {
+      ['>=#recovery:26.6.10:0']: {
+        up: arriveFromRecovery,
+      },
+    },
   },
 })
