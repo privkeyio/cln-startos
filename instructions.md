@@ -13,7 +13,7 @@
 - An optional **Clams Websocket** endpoint for Clams Remote.
 - **Sling** (channel rebalancing), built into the image as a plugin.
 - No watchtower: The Eye of Satoshi's tower cannot read BLAKE2b block headers, so the watchtower returns once it supports BLAKE2b.
-- No CLBOSS: it buys inbound liquidity through a swap service that has not adopted BLAKE2b, so it returns once that service supports it.
+- **CLBOSS** (automated channel management), built into the image as a plugin and off by default. This is an unofficial build that follows BLAKE2b and buys inbound liquidity through swap services on the BLAKE2b chain. It opens channels and spends funds on its own once enabled.
 - A required dependency on the **Knots** flavor of **Bitcoin**. Install and fully sync it first, because CLN will not start without it, and a standard Bitcoin node does not satisfy this package.
 
 ## Getting set up
@@ -45,7 +45,7 @@ If you publish the **Peer** interface through StartTunnel to keep your home IP p
 - **General Settings** — set alias, color, fee base and rate, minimum channel capacity, funding confirmations, Tor-only mode, Clams Websocket, a custom external host, and the Bitcoin retry timeout.
   - **Bitcoin Retry Timeout** is how long Core Lightning keeps retrying Bitcoin before it shuts down with "The Bitcoin backend died". The default is 60 seconds; raise it if that happens while Bitcoin is busy, such as during a reindex.
   - **Custom External Host** announces an external tunnel or VPN endpoint, as your node's public address. It is announced in place of any public IP StartOS detects, so peers are not handed the home IP the tunnel exists to hide; your Tor address is still announced. Core Lightning resolves the name once at startup, so restart it if the endpoint moves to a new address. Nothing is announced while Tor-only mode is on, because Core Lightning cannot resolve a hostname with every connection forced through the proxy — a failing **Custom External Host** health check appears while both are set, to tell you so.
-- **Plugins** — enable or disable CLNrest and Sling.
+- **Plugins** — enable or disable CLNrest, Sling and CLBOSS, and set CLBOSS's limits.
 - **Experimental Features** — toggle shutdown-wrong-funding and dual funding / liquidity ads (with policy, fuzz percentage, fund probability, and merchant lease-fee settings). Dual-funding amounts are in satoshis, except Channel Fee Max Base, which is in millisatoshis.
 - **Rescan Blockchain** — rescan the blockchain from a given depth or block height. **Required after restoring from backup** — the wallet balance reads zero until a rescan completes.
 - **Reset UI Password** — clear the CLN Application UI password so you can set a new one on your next visit from its `.local`, IP, or `.onion` address. It asks you to confirm first, because the current password stops working.

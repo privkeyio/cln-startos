@@ -372,6 +372,8 @@ const dict = {
   'Restrictions must be a JSON array of arrays of strings, with at least one string in each, such as [["method=getinfo"]].': 351,
   'Created a read-only rune.': 352,
   'Created a rune limited to the restrictions you entered.': 353,
+  'Max Swap Fee': 354,
+  "The most a swap may cost, in parts per million of the amount swapped, counting the swap service's percentage and its mining fees. CLBOSS skips a service that quotes more. 10000 is 1%.": 355,
 } as const
 
 /**
