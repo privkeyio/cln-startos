@@ -19,10 +19,14 @@ const removePluginsAndOldSocket = async ({
 }
 
 export const current = VersionInfo.of({
-  version: '#blake:26.6.10:1',
+  version: '#blake:26.6.10:2',
   releaseNotes: {
-    en_US: `Requires StartOS 0.4.1 or later. The node is still Core Lightning v26.06.10-blake2b.1.
+    en_US: `Requires StartOS 0.4.1 or later. Core Lightning v26.06.10-blake2b.2, which we recommend especially if you splice.
 
+- After a splice changes the channel reserves, the node keeps the earlier reserves for its own payments until the peer has had a chance to switch, and accepts the peer's payments under the earlier reserves on that connection. This avoids channel failures with peers that switch at a different point, including Lightning Fork.
+- A splice is treated as locked when the peer's later messages show it locked, even if its lock message was lost.
+- Splice negotiation now checks the channel reserve.
+- renepay accounts correctly for payment parts it did not send itself, and gossip processing is limited per peer.
 - Fixes memory use growing while the service runs.
 - Services that depend on Core Lightning now connect through a separate volume, either with a rune limited to invoices and payments or with full control of the node through its RPC socket, gRPC or admin rune. Services that use the RPC socket need their own update to keep connecting.
 - Peers can now connect to your node over its IPv6 addresses.
@@ -44,8 +48,7 @@ The watchtower and CLBOSS stay removed, since neither can follow BLAKE2b yet.
 
 ## Notes for operators
 
-- Updating from \`#blake:26.6.9:1\` through \`#blake:26.6.10:0\` does not change the database.
-- Updating from a version before \`#blake:26.6.9:1\` upgrades the node's database once, at its first start. That version cannot use the upgraded database, so back up before updating if you may need to go back.
+- This update upgrades the node's database once, at its first start. Earlier versions cannot use the upgraded database, so back up before updating if you may need to go back.
 - If the node stops with "80-byte header", its Bitcoin service is not following BLAKE2b. Point it at one that is.
 - Channels opened with \`v26.06.7-blake2b.1\` to \`.3\` do not use unified signatures. Close them and open new ones.`,
   },

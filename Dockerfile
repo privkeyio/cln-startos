@@ -33,13 +33,13 @@ RUN set -eu; \
 # BLAKE2b block header. Without it a node cannot parse the activation block and
 # dies on the first one.
 #
-# The hashes come from SHA256SUMS-v26.06.10-blake2b.1 (amd64) and SHA256SUMS-v26.06.10-blake2b.1-arm64, GPG-verified against A47D99B6DB0D715D40C59A2023AE8A8EA7E24E38.
+# The hashes come from SHA256SUMS-v26.06.10-blake2b.2 (amd64) and SHA256SUMS-v26.06.10-blake2b.2-arm64, GPG-verified against A47D99B6DB0D715D40C59A2023AE8A8EA7E24E38.
 FROM base AS lightningd-dist
 ARG TARGETARCH
 ARG CLN_REPO=privkeyio/lightning
-ARG CLN_VERSION=v26.06.10-blake2b.1
-ARG CLN_SHA256_AMD64=b3e7af0e376ae1f6b22f16c416a86474f6ab3c4d44c5aa6ef1a4a848a4cd9c72
-ARG CLN_SHA256_ARM64=7a54f4821acdf773c6f90ccb6fafdd2f5fda9e557f272311fc5b7b8862842ad6
+ARG CLN_VERSION=v26.06.10-blake2b.2
+ARG CLN_SHA256_AMD64=445113ffd66a38156ca303c259a97895446b5492b820cb4f26116575186b37c6
+ARG CLN_SHA256_ARM64=d55aa62f98e15a9a5535ae228426719dc2c3232dd1c96ad9566f1d279d4eeef2
 RUN apt-get update -qq && \
     apt-get install -qq -y --no-install-recommends ca-certificates xz-utils && \
     rm -rf /var/lib/apt/lists/*
