@@ -19,7 +19,7 @@ const removePluginsAndOldSocket = async ({
 }
 
 export const current = VersionInfo.of({
-  version: '#blake:26.6.10:2',
+  version: '#blake:26.6.10:3',
   releaseNotes: {
     en_US: `Requires StartOS 0.4.1 or later. Core Lightning v26.06.10-blake2b.2, which we recommend especially if you splice.
 
