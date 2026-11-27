@@ -24,8 +24,8 @@ export const current = VersionInfo.of({
     en_US: `Requires StartOS 0.4.1 or later. Core Lightning v26.06.10-blake2b.2, which we recommend especially if you splice.
 
 - After a splice changes the channel reserves, the node keeps the earlier reserves for its own payments until the peer has had a chance to switch, and accepts the peer's payments under the earlier reserves on that connection. This avoids channel failures with peers that switch at a different point, including Lightning Fork.
-- A splice is treated as locked when the peer's later messages show it locked, even if its lock message was lost.
-- Splice negotiation now checks the channel reserve.
+- A splice that leaves the channel's opener below the reserve no longer stops the channel.
+- Splice negotiation now checks the channel reserve, and a splice script's \`100%\` now means the funds that can leave while keeping the reserve, not the whole balance.
 - renepay accounts correctly for payment parts it did not send itself, and gossip processing is limited per peer.
 - Fixes memory use growing while the service runs.
 - Services that depend on Core Lightning now connect through a separate volume, either with a rune limited to invoices and payments or with full control of the node through its RPC socket, gRPC or admin rune. Services that use the RPC socket need their own update to keep connecting.
@@ -33,7 +33,7 @@ export const current = VersionInfo.of({
 
 If you are updating from a version before \`#blake:26.6.10:0\`, this update also brings:
 
-- Core Lightning v26.06.10-blake2b.1, based on upstream v26.06.10, which fixes security-relevant bugs: onchaind HTLC resolution, dual-funding and splice fixes, and gossip size limits.
+- The fixes from Core Lightning v26.06.10-blake2b.1, based on upstream v26.06.10, which fix security-relevant bugs: onchaind HTLC resolution, dual-funding and splice fixes, and gossip size limits.
 - Channels funded before the BLAKE2b activation are treated as private in gossip.
 - Transactions and PSBTs whose outputs exceed the maximum money supply are refused.
 - xpay holds payments until its startup requests have answered, and renepay handles failed payment routes more carefully.
